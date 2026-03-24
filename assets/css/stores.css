@@ -1,4 +1,4 @@
-/* Daily Missions Styles */
+/* Daily & Weekly Stores Styles */
 :root {
   --bg-dark: #0e1621;
   --panel: #1b2838;
@@ -9,6 +9,8 @@
   --accent-2: #5fa0e0;
   --success: #3fb950;
   --active: #22c55e;
+  --weekly-accent: #a78bfa;
+  --weekly-active: #8b5cf6;
   --radius: 12px;
 }
 
@@ -75,45 +77,72 @@ h1 {
   font-weight: 600;
 }
 
-.home-link:hover { 
-  background: var(--accent); 
+.home-link:hover {
+  background: var(--accent);
   color: var(--text);
 }
 
 /* Progress ring */
 .progress {
   position: relative;
-  width: 82px; 
+  width: 82px;
   height: 82px;
 }
 
-.progress svg { 
+.progress svg {
   transform: rotate(-90deg);
 }
 
-.progress .track { 
+.progress .track {
   stroke: rgba(255,255,255,0.1);
 }
 
-.progress .indicator { 
-  stroke: var(--accent-2); 
+.progress .indicator {
+  stroke: var(--accent-2);
   transition: stroke-dashoffset 0.35s ease;
 }
 
 .progress .label {
-  position: absolute; 
+  position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
-  display: flex; 
-  align-items: center; 
+  display: flex;
+  align-items: center;
   justify-content: center;
-  font-weight: 700; 
-  font-size: 0.95rem; 
+  font-weight: 700;
+  font-size: 0.95rem;
   color: var(--text);
+}
+
+/* Section headers */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 0 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border-left: 4px solid var(--accent);
+  background: rgba(79, 140, 201, 0.08);
+}
+
+.section-header.weekly-header {
+  border-left-color: var(--weekly-accent);
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.section-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.section-note {
+  font-size: 0.8rem;
+  color: var(--muted);
 }
 
 /* Checklist */
 .list {
-  margin-top: 10px;
   display: grid;
   gap: 10px;
 }
@@ -140,11 +169,25 @@ h1 {
   border-color: var(--active);
 }
 
+#weeklyList .item:hover {
+  border-color: var(--weekly-accent);
+  background: rgba(167, 139, 250, 0.1);
+}
+
+#weeklyList .item.done {
+  background: rgba(139, 92, 246, 0.12);
+  border-color: var(--weekly-active);
+}
+
 input[type="checkbox"] {
   width: 20px;
   height: 20px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+#weeklyList input[type="checkbox"] {
+  accent-color: var(--weekly-accent);
 }
 
 .label {
@@ -154,33 +197,16 @@ input[type="checkbox"] {
   user-select: none;
 }
 
-.done .label { 
-  color: var(--muted); 
-  text-decoration: line-through; 
-}
-
-.learn-more {
-  font-size: 0.82rem;
-  color: var(--accent);
-  text-decoration: none;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 3px 9px;
-  white-space: nowrap;
-  transition: 0.2s ease;
-  flex-shrink: 0;
-}
-
-.learn-more:hover {
-  background: var(--accent);
-  color: var(--bg-dark);
+.done .label {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .row-end {
   margin-top: 16px;
-  display: flex; 
-  gap: 10px; 
-  flex-wrap: wrap; 
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
@@ -190,30 +216,30 @@ input[type="checkbox"] {
   color: var(--text);
   padding: 10px 14px;
   border-radius: 10px;
-  cursor: pointer; 
-  transition: 0.2s; 
+  cursor: pointer;
+  transition: 0.2s;
   font-weight: 600;
 }
 
-.btn:hover { 
-  background: var(--accent); 
+.btn:hover {
+  background: var(--accent);
   border-color: var(--accent);
 }
 
 .btn.secondary {
-  background: transparent; 
-  border-color: rgba(255,255,255,0.2); 
+  background: transparent;
+  border-color: rgba(255,255,255,0.2);
   color: var(--muted);
 }
 
-.btn.secondary:hover { 
-  border-color: rgba(255,255,255,0.4); 
-  color: var(--text); 
+.btn.secondary:hover {
+  border-color: rgba(255,255,255,0.4);
+  color: var(--text);
 }
 
-footer { 
-  margin-top: 14px; 
-  color: var(--muted); 
-  font-size: 0.9rem; 
-  text-align: right; 
+footer {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: right;
 }

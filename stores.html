@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Daily & Weekly Stores - Blue Protocol</title>
+  <link rel="stylesheet" href="assets/css/stores.css">
+</head>
+<body>
+  <main class="card" role="main">
+    <header>
+      <div>
+        <h1>Daily & Weekly Stores</h1>
+        <div class="sub" id="dateSub">Track your store resets.</div>
+      </div>
+      <div class="topbar">
+        <a class="home-link" href="index.html">← Home</a>
+
+        <!-- Progress circle -->
+        <div class="progress" aria-hidden="true">
+          <svg width="82" height="82">
+            <circle class="track" cx="41" cy="41" r="34" stroke-width="8" fill="none"/>
+            <circle class="indicator" id="ring" cx="41" cy="41" r="34" stroke-width="8" fill="none"
+                    stroke-linecap="round" stroke-dasharray="213.628" stroke-dashoffset="213.628"/>
+          </svg>
+          <div class="label" id="progressLabel">0%</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Daily Stores -->
+    <div class="section-header daily-header">
+      <span class="section-title">🌅 Daily Stores</span>
+      <span class="section-note">Resets every day at 6:00 AM</span>
+    </div>
+    <section class="list" id="dailyList"></section>
+
+    <!-- Weekly Stores -->
+    <div class="section-header weekly-header">
+      <span class="section-title">📅 Weekly Stores</span>
+      <span class="section-note">Resets every Monday at 6:00 AM</span>
+    </div>
+    <section class="list" id="weeklyList"></section>
+
+    <div class="row-end">
+      <button class="btn secondary" id="resetBtn" title="Uncheck all stores">Reset</button>
+    </div>
+
+    <footer id="summary">0 / 8 completed</footer>
+  </main>
+
+  <script src="assets/js/stores.js"></script>
+</body>
+</html>
