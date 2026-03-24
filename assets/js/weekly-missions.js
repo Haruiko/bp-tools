@@ -106,7 +106,7 @@ TASKS.forEach((text, idx) => {
   // Add 'Learn more' link for Life Skill Quests
   if (idx === 0) {
     const link = document.createElement("a");
-    link.href = "weekly-lifestyle.html";
+    link.href = "../weekly-lifestyle/";
     link.className = "learn-more";
     link.textContent = "Learn more";
     link.addEventListener("click", e => e.stopPropagation());
