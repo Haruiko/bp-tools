@@ -205,8 +205,11 @@
         status:  getChannelStatus(r.last_hp, r.last_update),
       })).filter(c => c.status !== 'unknown');
 
-      /* Sort: lowest HP first (dead = 0% at top, then HP ascending) */
-      processed.sort((a, b) => a.hp - b.hp);
+      /* Sort: low HP first → 100% HP → dead (0%) last */
+      processed.sort((a, b) => {
+        const rank = hp => hp === 0 ? 101 : hp; // treat dead as 101 so it sinks to end
+        return rank(a.hp) - rank(b.hp);
+      });
 
       for (let i = 0; i < MAX_CHANNELS; i++) {
         const span = document.createElement('span');
