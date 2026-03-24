@@ -8,6 +8,8 @@
   const PB_BASE = 'https://db.bptimer.com';
   const MAX_CHANNELS = 15;
   const POLL_INTERVAL = 30_000; // 30 seconds
+  const WEBHOOK_KEY      = 'bt_discord_webhook';
+  const AUTO_ALERT_KEY   = 'bt_auto_alert';
 
   /* ── Stale-data thresholds (mirrors bptimer source) ── */
   const STALE_FULL_HP  = 5 * 60 * 1000; // 5 min  — 100 % HP
@@ -33,6 +35,7 @@
   /* ── State ── */
   let region = 'SEA';
   let channelData = {}; // { [bossId]: rawRecord[] }
+  let prevHpMap   = {}; // { ["bossId-channel"]: lastKnownHp } — for auto-alert threshold tracking
 
   /* ── Helpers ── */
   function getNextRespawn(respawnMin) {
@@ -67,6 +70,101 @@
     return age > timeout ? 'unknown' : 'alive';
   }
 
+  /* ── Discord webhook ── */
+  function getWebhookUrl() {
+    return localStorage.getItem(WEBHOOK_KEY) || '';
+  }
+
+  function isAutoAlertEnabled() {
+    // Default ON if not explicitly set to 'off'
+    return localStorage.getItem(AUTO_ALERT_KEY) !== 'off';
+  }
+
+  function setAutoAlert(enabled) {
+    localStorage.setItem(AUTO_ALERT_KEY, enabled ? 'on' : 'off');
+  }
+
+  function configureWebhook() {
+    const current = getWebhookUrl();
+    const url = prompt('Paste your Discord Webhook URL below (leave blank to clear):', current);
+    if (url === null) return; // user cancelled
+    const trimmed = url.trim();
+    if (trimmed) {
+      localStorage.setItem(WEBHOOK_KEY, trimmed);
+      alert('✅ Discord webhook saved!');
+    } else {
+      localStorage.removeItem(WEBHOOK_KEY);
+      alert('Discord webhook cleared.');
+    }
+  }
+
+  async function sendDiscordMessage(bossName, channel, hp, { promptIfMissing = true } = {}) {
+    let webhookUrl = getWebhookUrl();
+    if (!webhookUrl) {
+      if (!promptIfMissing) return; // auto-alerts skip silently when no webhook set
+      const url = prompt('No Discord webhook set.\nPaste your Webhook URL to continue:');
+      if (!url || !url.trim()) return;
+      webhookUrl = url.trim();
+      localStorage.setItem(WEBHOOK_KEY, webhookUrl);
+    }
+    const healthText = hp === 0 ? 'Killed' : `${hp}%`;
+    const content = `Line: ${channel}\nBoss: ${bossName}\nHealth: ${healthText}`;
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        alert(`❌ Discord returned an error (${res.status}).\nClick "🔔 Discord" to update your webhook URL.`);
+      }
+    } catch (_) {
+      alert('❌ Network error — could not reach Discord.');
+    }
+  }
+
+  /* ── Auto-alert: check HP threshold transitions after each poll ── */
+  function checkAlerts(grouped) {
+    if (!getWebhookUrl()) return;    // no webhook configured — skip silently
+    if (!isAutoAlertEnabled()) return; // user toggled auto-alerts off
+
+    for (const boss of BOSSES) {
+      const records = grouped[boss.id] || [];
+      const currentKeys = new Set();
+
+      for (const r of records) {
+        const status = getChannelStatus(r.last_hp, r.last_update);
+        if (status === 'unknown') continue;
+
+        const key = `${boss.id}-${r.channel_number}`;
+        currentKeys.add(key);
+        const prev = prevHpMap[key];
+
+        // First time seeing this channel — just initialise, don't alert
+        if (prev === undefined) {
+          prevHpMap[key] = r.last_hp;
+          continue;
+        }
+
+        const crossedLow = prev > 30 && r.last_hp > 0 && r.last_hp <= 30;
+        const justKilled = prev > 0  && r.last_hp === 0;
+
+        if (crossedLow || justKilled) {
+          sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false });
+        }
+
+        prevHpMap[key] = r.last_hp;
+      }
+
+      // Remove channels that disappeared (boss respawned) so they can alert again next cycle
+      for (const key of Object.keys(prevHpMap)) {
+        if (key.startsWith(`${boss.id}-`) && !currentKeys.has(key)) {
+          delete prevHpMap[key];
+        }
+      }
+    }
+  }
+
   /* ── Data fetching ── */
   async function fetchChannelData() {
     const orCond = BOSSES.map(b => `mob='${b.id}'`).join('||');
@@ -86,6 +184,7 @@
         if (record.mob in grouped) grouped[record.mob].push(record);
       }
       channelData = grouped;
+      checkAlerts(grouped);
       renderAllChannels();
     } catch (_) {
       // Network error – keep showing previous data
@@ -123,8 +222,10 @@
         if (item) {
           span.className = `bt-pill bt-pill--${item.status}`;
           span.title = item.status === 'dead'
-            ? `Ch ${item.ch} — Boss killed`
-            : `Ch ${item.ch} — ${item.hp}% HP`;
+            ? `Ch ${item.ch} — Boss killed (click to report)`
+            : `Ch ${item.ch} — ${item.hp}% HP (click to report)`;
+          span.classList.add('bt-pill--clickable');
+          span.addEventListener('click', () => sendDiscordMessage(boss.name, item.ch, item.hp));
 
           // HP fill bar
           const fill = document.createElement('span');
@@ -177,7 +278,32 @@
     /* Header */
     const header = document.createElement('div');
     header.className = 'bt-header';
-    header.innerHTML = `<h2 class="bt-title">🐉 Boss Tracker — SEA</h2>`;
+    const titleEl = document.createElement('h2');
+    titleEl.className = 'bt-title';
+    titleEl.textContent = '🐉 Boss Tracker — SEA';
+    const webhookBtn = document.createElement('button');
+    webhookBtn.className = 'bt-webhook-btn';
+    webhookBtn.title = 'Configure Discord Webhook';
+    webhookBtn.textContent = '🔔 Discord';
+    webhookBtn.addEventListener('click', configureWebhook);
+
+    const autoBtn = document.createElement('button');
+    autoBtn.className = 'bt-auto-btn';
+    const updateAutoBtn = () => {
+      const on = isAutoAlertEnabled();
+      autoBtn.textContent = on ? '🟢 Auto-Alert' : '🔴 Auto-Alert';
+      autoBtn.title = on ? 'Auto-alerts ON — click to disable' : 'Auto-alerts OFF — click to enable';
+      autoBtn.classList.toggle('bt-auto-btn--off', !on);
+    };
+    updateAutoBtn();
+    autoBtn.addEventListener('click', () => {
+      setAutoAlert(!isAutoAlertEnabled());
+      updateAutoBtn();
+    });
+
+    header.appendChild(titleEl);
+    header.appendChild(autoBtn);
+    header.appendChild(webhookBtn);
     section.appendChild(header);
 
     /* Cards */
