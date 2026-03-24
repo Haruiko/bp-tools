@@ -127,6 +127,128 @@ p {
   }
 }
 
+/* ── Quality of Life Tools ── */
+.qol-section {
+  margin-top: 48px;
+  width: 100%;
+  max-width: 1100px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.qol-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.qol-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.qol-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text-main);
+  font-size: 0.92rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.qol-button:hover {
+  background: rgba(79, 140, 201, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+
+.qol-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.qol-ext {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.qol-button:hover .qol-ext {
+  color: var(--accent);
+}
+
+/* ── Timer strip ── */
+.timers {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 36px;
+  width: 100%;
+  max-width: 1100px;
+  padding: 0 16px;
+}
+
+.timer-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 14px 20px;
+  min-width: 175px;
+  flex: 1 1 175px;
+  max-width: 230px;
+  transition: border-color 0.2s;
+}
+
+.timer-card:hover {
+  border-color: var(--accent);
+}
+
+.timer-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.timer-body {
+  text-align: left;
+  min-width: 0;
+}
+
+.timer-name {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timer-value {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
 @media (max-width: 480px) {
   .nav-buttons {
     flex-direction: column;
@@ -136,6 +258,10 @@ p {
   .nav-button {
     width: 100%;
     max-width: 280px;
+  }
+
+  .timer-card {
+    max-width: 100%;
   }
 }
 
