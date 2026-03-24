@@ -292,6 +292,7 @@ body {
 /* ── Card footer (View Details button) ── */
 .bt-footer {
   display: flex;
+  gap: 8px;
 }
 
 .bt-details-btn {
@@ -311,6 +312,25 @@ body {
 .bt-details-btn:hover {
   background: rgba(79,140,201,0.22);
   border-color: var(--accent);
+}
+
+.bt-alert-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(234,88,12,0.1);
+  border: 1px solid rgba(234,88,12,0.3);
+  color: #fb923c;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bt-alert-btn:hover {
+  background: rgba(234,88,12,0.22);
+  border-color: #fb923c;
 }
 
 /* ── Credits ── */

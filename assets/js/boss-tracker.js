@@ -205,15 +205,8 @@
         status:  getChannelStatus(r.last_hp, r.last_update),
       })).filter(c => c.status !== 'unknown');
 
-      /* Sort: alive first (by HP asc), then dead (most recent first) */
-      processed.sort((a, b) => {
-        if (a.status === 'alive' && b.status !== 'alive') return -1;
-        if (b.status === 'alive' && a.status !== 'alive') return 1;
-        if (a.status === 'dead' && b.status === 'dead') {
-          return new Date(b.updated).getTime() - new Date(a.updated).getTime();
-        }
-        return a.ch - b.ch;
-      });
+      /* Sort: lowest HP first (dead = 0% at top, then HP ascending) */
+      processed.sort((a, b) => a.hp - b.hp);
 
       for (let i = 0; i < MAX_CHANNELS; i++) {
         const span = document.createElement('span');
@@ -287,22 +280,7 @@
     webhookBtn.textContent = '🔔 Discord';
     webhookBtn.addEventListener('click', configureWebhook);
 
-    const autoBtn = document.createElement('button');
-    autoBtn.className = 'bt-auto-btn';
-    const updateAutoBtn = () => {
-      const on = isAutoAlertEnabled();
-      autoBtn.textContent = on ? '🟢 Auto-Alert' : '🔴 Auto-Alert';
-      autoBtn.title = on ? 'Auto-alerts ON — click to disable' : 'Auto-alerts OFF — click to enable';
-      autoBtn.classList.toggle('bt-auto-btn--off', !on);
-    };
-    updateAutoBtn();
-    autoBtn.addEventListener('click', () => {
-      setAutoAlert(!isAutoAlertEnabled());
-      updateAutoBtn();
-    });
-
     header.appendChild(titleEl);
-    header.appendChild(autoBtn);
     header.appendChild(webhookBtn);
     section.appendChild(header);
 
@@ -333,9 +311,21 @@
              href="https://bptimer.com/"
              target="_blank"
              rel="noopener noreferrer">View Details ↗</a>
+          <button class="bt-alert-btn" id="btalert-${boss.id}" type="button">📢 Send Alert</button>
         </div>
       `;
       cardsRow.appendChild(card);
+
+      /* Wire per-boss alert button: sends the lowest-HP channel for this boss */
+      card.querySelector(`#btalert-${boss.id}`).addEventListener('click', () => {
+        const records = (channelData[boss.id] || [])
+          .map(r => ({ ch: r.channel_number, hp: r.last_hp, status: getChannelStatus(r.last_hp, r.last_update) }))
+          .filter(c => c.status !== 'unknown')
+          .sort((a, b) => a.hp - b.hp);
+        if (!records.length) { alert('No live channel data yet for ' + boss.name); return; }
+        const top = records[0];
+        sendDiscordMessage(boss.name, top.ch, top.hp);
+      });
     }
 
     /* Credits note */
