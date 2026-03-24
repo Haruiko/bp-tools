@@ -1,0 +1,293 @@
+/* ----------------------------------------
+   Boss Tracker Page Styles
+   ---------------------------------------- */
+:root {
+  --bg-dark:    #0e1621;
+  --bg-panel:   #1b2838;
+  --accent:     #4f8cc9;
+  --text-main:  #e5e9f0;
+  --text-muted: #a3b1c6;
+  --gap:        20px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg-dark);
+  color: var(--text-main);
+  min-height: 100vh;
+}
+
+/* ── Page wrapper ── */
+.bt-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 36px 24px 60px;
+}
+
+/* ── Page header ── */
+.bt-page-header {
+  margin-bottom: 36px;
+}
+
+.bt-home-link {
+  display: inline-block;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  transition: color 0.2s;
+}
+
+.bt-home-link:hover {
+  color: var(--accent);
+}
+
+.bt-page-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--accent);
+  margin: 0 0 8px 0;
+}
+
+.bt-page-sub {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+/* ── Tracker section wrapper ── */
+#boss-tracker {
+  width: 100%;
+}
+
+/* ── Header row (title + region toggle) ── */
+.bt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.bt-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.bt-region-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.bt-region-btn {
+  padding: 5px 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bt-region-btn.active,
+.bt-region-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* ── Cards row ── */
+.bt-cards {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.bt-card {
+  background: var(--bg-panel);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 14px;
+  padding: 20px;
+  width: 300px;
+  flex-shrink: 0;
+  transition: border-color 0.2s;
+}
+
+.bt-card:hover {
+  border-color: rgba(79,140,201,0.4);
+}
+
+.bt-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.bt-boss-name {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--text-main);
+}
+
+.bt-boss-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+}
+
+/* ── Respawn row ── */
+.bt-respawn-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.bt-respawn-val {
+  font-weight: 700;
+  color: var(--text-main);
+  font-size: 0.92rem;
+}
+
+/* ── Progress bar ── */
+.bt-prog-wrap {
+  height: 5px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.bt-prog-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  border-radius: 3px;
+  transition: width 1s linear;
+}
+
+/* ── Channel grid ── */
+.bt-channels {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin-bottom: 16px;
+}
+
+/* ── Channel pill ── */
+.bt-pill {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  user-select: none;
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  cursor: default;
+}
+
+/* HP fill bar sits behind label */
+.bt-pill-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  z-index: 0;
+  border-radius: 5px;
+  transition: width 0.6s ease, background-color 0.4s ease;
+}
+
+.bt-pill-label {
+  position: relative;
+  z-index: 1;
+  line-height: 1;
+}
+
+.bt-pill-fill--healthy { background: #16a34a; }           /* green  — HP > 30% */
+.bt-pill-fill--low     { background: #ea580c; }           /* orange — HP 1–30% */
+.bt-pill-fill--dead    { background: #b91c1c; width: 100% !important; } /* red — killed */
+
+.bt-pill--dead  { color: #fca5a5; }
+.bt-pill--empty { color: rgba(255,255,255,0.2); }
+
+/* ── Card footer (View Details button) ── */
+.bt-footer {
+  display: flex;
+}
+
+.bt-details-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(79,140,201,0.1);
+  border: 1px solid rgba(79,140,201,0.25);
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.bt-details-btn:hover {
+  background: rgba(79,140,201,0.22);
+  border-color: var(--accent);
+}
+
+/* ── Credits ── */
+.bt-credits {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  opacity: 0.65;
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.bt-credits a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.bt-credits a:hover {
+  text-decoration: underline;
+}
+
+/* ── Responsive ── */
+@media (max-width: 680px) {
+  .bt-page {
+    padding: 24px 16px 48px;
+  }
+
+  .bt-cards {
+    justify-content: center;
+  }
+
+  .bt-card {
+    width: 100%;
+    max-width: 340px;
+  }
+
+  .bt-page-title {
+    font-size: 1.6rem;
+  }
+}

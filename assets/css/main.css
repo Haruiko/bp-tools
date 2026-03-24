@@ -111,6 +111,11 @@ p {
   margin: 0;
 }
 
+.nav-button--full {
+  width: 100%;
+  flex: 1 1 100%;
+}
+
 @media (max-width: 768px) {
   .nav-buttons {
     gap: 20px;
