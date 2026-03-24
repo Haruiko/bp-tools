@@ -6,6 +6,8 @@
   --text-main: #e5e9f0;
   --text-muted: #a3b1c6;
   --hover: #5fa0e0;
+  --gap: 20px;
+  --content-width: 1060px;
 }
 
 * {
@@ -44,9 +46,12 @@ p {
 
 .nav-buttons {
   display: flex;
-  gap: 30px;
+  gap: var(--gap);
   flex-wrap: wrap;
   justify-content: center;
+  width: 100%;
+  max-width: var(--content-width);
+  padding: 0 20px;
 }
 
 .nav-button {
@@ -131,8 +136,8 @@ p {
 .qol-section {
   margin-top: 48px;
   width: 100%;
-  max-width: 1100px;
-  padding: 0 16px;
+  max-width: var(--content-width);
+  padding: 0 20px;
   text-align: center;
 }
 
@@ -146,10 +151,9 @@ p {
 }
 
 .qol-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--gap);
 }
 
 .qol-button {
@@ -194,13 +198,13 @@ p {
 /* ── Timer strip ── */
 .timers {
   display: flex;
-  gap: 12px;
+  gap: var(--gap);
   flex-wrap: wrap;
   justify-content: center;
   margin-bottom: 36px;
   width: 100%;
-  max-width: 1100px;
-  padding: 0 16px;
+  max-width: var(--content-width);
+  padding: 0 20px;
 }
 
 .timer-card {
@@ -211,9 +215,7 @@ p {
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 12px;
   padding: 14px 20px;
-  min-width: 175px;
   flex: 1 1 175px;
-  max-width: 230px;
   transition: border-color 0.2s;
 }
 
