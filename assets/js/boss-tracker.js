@@ -9,7 +9,7 @@
   const MAX_CHANNELS = 15;
   const POLL_INTERVAL = 30_000; // 30 seconds
   const WEBHOOK_KEY      = 'bt_discord_webhook';
-  const AUTO_ALERT_KEY   = 'bt_auto_alert';
+  const ALERT_KEY_PREFIX  = 'bt_auto_alert_'; // + bossId
 
   /* ── Stale-data thresholds (mirrors bptimer source) ── */
   const STALE_FULL_HP  = 5 * 60 * 1000; // 5 min  — 100 % HP
@@ -75,13 +75,13 @@
     return localStorage.getItem(WEBHOOK_KEY) || '';
   }
 
-  function isAutoAlertEnabled() {
+  function isAutoAlertEnabled(bossId) {
     // Default ON if not explicitly set to 'off'
-    return localStorage.getItem(AUTO_ALERT_KEY) !== 'off';
+    return localStorage.getItem(ALERT_KEY_PREFIX + bossId) !== 'off';
   }
 
-  function setAutoAlert(enabled) {
-    localStorage.setItem(AUTO_ALERT_KEY, enabled ? 'on' : 'off');
+  function setAutoAlert(bossId, enabled) {
+    localStorage.setItem(ALERT_KEY_PREFIX + bossId, enabled ? 'on' : 'off');
   }
 
   function configureWebhook() {
@@ -125,10 +125,10 @@
 
   /* ── Auto-alert: check HP threshold transitions after each poll ── */
   function checkAlerts(grouped) {
-    if (!getWebhookUrl()) return;    // no webhook configured — skip silently
-    if (!isAutoAlertEnabled()) return; // user toggled auto-alerts off
+    if (!getWebhookUrl()) return; // no webhook configured — skip silently
 
     for (const boss of BOSSES) {
+      if (!isAutoAlertEnabled(boss.id)) continue; // this boss's alerts are toggled off
       const records = grouped[boss.id] || [];
       const currentKeys = new Set();
 
@@ -314,20 +314,23 @@
              href="https://bptimer.com/"
              target="_blank"
              rel="noopener noreferrer">View Details ↗</a>
-          <button class="bt-alert-btn" id="btalert-${boss.id}" type="button">📢 Send Alert</button>
+          <button class="bt-alert-btn" id="btalert-${boss.id}" type="button"></button>
         </div>
       `;
       cardsRow.appendChild(card);
 
-      /* Wire per-boss alert button: sends the lowest-HP channel for this boss */
-      card.querySelector(`#btalert-${boss.id}`).addEventListener('click', () => {
-        const records = (channelData[boss.id] || [])
-          .map(r => ({ ch: r.channel_number, hp: r.last_hp, status: getChannelStatus(r.last_hp, r.last_update) }))
-          .filter(c => c.status !== 'unknown')
-          .sort((a, b) => a.hp - b.hp);
-        if (!records.length) { alert('No live channel data yet for ' + boss.name); return; }
-        const top = records[0];
-        sendDiscordMessage(boss.name, top.ch, top.hp);
+      /* Wire per-boss alert toggle */
+      const alertBtn = card.querySelector(`#btalert-${boss.id}`);
+      const refreshAlertBtn = () => {
+        const on = isAutoAlertEnabled(boss.id);
+        alertBtn.textContent = on ? '🟢 Alerts ON' : '🔴 Alerts OFF';
+        alertBtn.title = on ? 'Auto-alerts ON — click to disable' : 'Auto-alerts OFF — click to enable';
+        alertBtn.classList.toggle('bt-alert-btn--off', !on);
+      };
+      refreshAlertBtn();
+      alertBtn.addEventListener('click', () => {
+        setAutoAlert(boss.id, !isAutoAlertEnabled(boss.id));
+        refreshAlertBtn();
       });
     }
 
