@@ -3,19 +3,18 @@
    ------------------------------ */
 
 const TASKS = [
-  "Unstable Space",
+  "Unstable Space 2x",
+  "Elite Hunt Chest 2x",
+  "World Hunt Chest 2x",
   "Season Pass Activity Merits",
   "Bureau Commissions",
-  "Elite Hunt Chest",
-  "World Hunt Chest",
   "Life Skill Focus",
   "Leisure Activities",
   "Homestead Commissions",
   "World Boss Crusade",
   "Guild Check-In",
   "Guild Cargo",
-  "Guild Hunt",
-  "Mystery Store"
+  "Guild Hunt ( Every Fri, Sat, Sun )",
 ];
 
 const KEY = "daily-missions-v1";   // store check states
