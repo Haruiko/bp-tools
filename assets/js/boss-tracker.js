@@ -30,6 +30,30 @@
       respawnMin: 30,  // respawns at every HH:30 UTC
       image: 'https://bptimer.com/images/bosses/goblin_chief.webp',
     },
+    {
+      id: '3bw8w75ct4w1tjb',
+      name: 'Cabbage Kingpin',
+      respawnMin: 0,   // respawns at every HH:00 UTC
+      image: 'https://bptimer.com/images/bosses/cabbage_kingpin.webp',
+    },
+    {
+      id: 'x9ls682xem020cr',
+      name: 'Blackstone Captain',
+      respawnMin: 30,  // respawns at every HH:30 UTC
+      image: 'https://bptimer.com/images/bosses/blackstone_captain.webp',
+    },
+    {
+      id: 'c60g15hv8tpojd2',
+      name: 'Crimson Foxen',
+      respawnMin: 0,   // respawns at every HH:00 UTC
+      image: 'https://bptimer.com/images/bosses/crimson_foxen.webp',
+    },
+    {
+      id: 'p1dmp4dkgy9ts2',
+      name: 'Flamehorn',
+      respawnMin: 30,  // respawns at every HH:30 UTC
+      image: 'https://bptimer.com/images/bosses/flamehorn.webp',
+    },
   ];
 
   /* ── State ── */
@@ -279,9 +303,14 @@
     titleEl.textContent = '🐉 Boss Tracker — SEA';
     const webhookBtn = document.createElement('button');
     webhookBtn.className = 'bt-webhook-btn';
-    webhookBtn.title = 'Configure Discord Webhook';
-    webhookBtn.textContent = '🔔 Discord';
-    webhookBtn.addEventListener('click', configureWebhook);
+    const refreshWebhookBtn = () => {
+      const connected = !!getWebhookUrl();
+      webhookBtn.textContent = connected ? '✅ Connected' : '🔔 Connect to Discord';
+      webhookBtn.title = connected ? 'Discord connected — click to update or remove' : 'Connect a Discord webhook';
+      webhookBtn.classList.toggle('bt-webhook-btn--connected', connected);
+    };
+    refreshWebhookBtn();
+    webhookBtn.addEventListener('click', () => { configureWebhook(); refreshWebhookBtn(); });
 
     header.appendChild(titleEl);
     header.appendChild(webhookBtn);
