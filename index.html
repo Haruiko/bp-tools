@@ -23,11 +23,13 @@
       <p class="description">Calculate crafting profits and optimize your returns</p>
     </a>
     <a href="daily-missions/" class="nav-button" aria-label="Open Daily Missions Tracker">
+      <span class="nav-progress-badge" id="daily-progress-badge">0%</span>
       <div class="icon">📜</div>
       <h3>Daily Missions</h3>
       <p class="description">Track your daily tasks and progress</p>
     </a>
     <a href="weekly-missions/" class="nav-button" aria-label="Open Weekly Mission">
+      <span class="nav-progress-badge" id="weekly-progress-badge">0%</span>
       <div class="icon">📅</div>
       <h3>Weekly Mission</h3>
       <p class="description">Track your weekly tasks and progress</p>
@@ -76,5 +78,26 @@
   </footer>
 
   <script src="assets/js/timers.js"></script>
+  <script>
+    (function () {
+      // Daily missions — total tasks defined in assets/js/daily-missions.js GROUPS
+      const DAILY_TOTAL = 12;
+      const dailySaved = JSON.parse(localStorage.getItem('daily-missions-v2') || '{}');
+      const dailyDone = Object.values(dailySaved).filter(Boolean).length;
+      const dailyPct = Math.round((dailyDone / DAILY_TOTAL) * 100);
+      const dailyBadge = document.getElementById('daily-progress-badge');
+      dailyBadge.textContent = dailyPct + '%';
+      if (dailyPct === 100) dailyBadge.classList.add('nav-progress-badge--done');
+
+      // Weekly missions — total tasks defined in assets/js/weekly-missions.js GROUPS
+      const WEEKLY_TOTAL = 18;
+      const weeklySaved = JSON.parse(localStorage.getItem('weekly-missions-v2') || '{}');
+      const weeklyDone = Object.values(weeklySaved).filter(Boolean).length;
+      const weeklyPct = Math.round((weeklyDone / WEEKLY_TOTAL) * 100);
+      const weeklyBadge = document.getElementById('weekly-progress-badge');
+      weeklyBadge.textContent = weeklyPct + '%';
+      if (weeklyPct === 100) weeklyBadge.classList.add('nav-progress-badge--done');
+    })();
+  </script>
 </body>
 </html>

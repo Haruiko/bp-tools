@@ -116,6 +116,27 @@ p {
   flex: 1 1 100%;
 }
 
+.nav-progress-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 10px;
+  line-height: 1;
+  min-width: 32px;
+  text-align: center;
+  letter-spacing: 0.02em;
+  z-index: 1;
+}
+
+.nav-progress-badge--done {
+  background: #27ae60;
+}
+
 @media (max-width: 768px) {
   .nav-buttons {
     gap: 20px;
