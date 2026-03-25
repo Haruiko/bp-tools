@@ -60,6 +60,7 @@
   let region = 'SEA';
   let channelData = {}; // { [bossId]: rawRecord[] }
   let prevHpMap   = {}; // { ["bossId-channel"]: lastKnownHp } — for auto-alert threshold tracking
+  let pendingAlertMsgIds = {}; // { ["bossId-channel"]: discordMessageId } — 30% HP messages pending paired deletion
 
   /* ── Helpers ── */
   function getNextRespawn(respawnMin) {
@@ -122,7 +123,9 @@
     }
   }
 
-  async function sendDiscordMessage(bossName, channel, hp, { promptIfMissing = true } = {}) {
+  const DELETE_AFTER_MS = 10_000; // delete the Discord message after 10 seconds
+
+  async function sendDiscordMessage(bossName, channel, hp, { promptIfMissing = true, autoDelete = true } = {}) {
     let webhookUrl = getWebhookUrl();
     if (!webhookUrl) {
       if (!promptIfMissing) return; // auto-alerts skip silently when no webhook set
@@ -134,21 +137,35 @@
     const healthText = hp === 0 ? 'Killed' : `${hp}%`;
     const content = `Line: ${channel}\nBoss: ${bossName}\nHealth: ${healthText}`;
     try {
-      const res = await fetch(webhookUrl, {
+      // ?wait=true makes Discord return the created message object (with its ID)
+      const res = await fetch(`${webhookUrl}?wait=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content }),
       });
       if (!res.ok) {
         alert(`❌ Discord returned an error (${res.status}).\nClick "🔔 Discord" to update your webhook URL.`);
+        return;
       }
+      const msg = await res.json();
+      if (autoDelete) {
+        // Schedule deletion after DELETE_AFTER_MS milliseconds
+        setTimeout(async () => {
+          try {
+            await fetch(`${webhookUrl}/messages/${msg.id}`, { method: 'DELETE' });
+          } catch (_) {
+            // Silently ignore deletion errors
+          }
+        }, DELETE_AFTER_MS);
+      }
+      return msg.id;
     } catch (_) {
       alert('❌ Network error — could not reach Discord.');
     }
   }
 
   /* ── Auto-alert: check HP threshold transitions after each poll ── */
-  function checkAlerts(grouped) {
+  async function checkAlerts(grouped) {
     if (!getWebhookUrl()) return; // no webhook configured — skip silently
 
     for (const boss of BOSSES) {
@@ -173,8 +190,24 @@
         const crossedLow = prev > 30 && r.last_hp > 0 && r.last_hp <= 30;
         const justKilled = prev > 0  && r.last_hp === 0;
 
-        if (crossedLow || justKilled) {
-          sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false });
+        if (crossedLow) {
+          // Store the message ID so it can be deleted together with the killed message
+          const msgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
+          if (msgId) pendingAlertMsgIds[key] = msgId;
+        }
+
+        if (justKilled) {
+          const wh = getWebhookUrl();
+          const lowMsgId = pendingAlertMsgIds[key];
+          delete pendingAlertMsgIds[key];
+          const killedMsgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
+          // After 10 s delete the killed message and the paired 30% message simultaneously
+          setTimeout(async () => {
+            const deletions = [];
+            if (killedMsgId) deletions.push(fetch(`${wh}/messages/${killedMsgId}`, { method: 'DELETE' }).catch(() => {}));
+            if (lowMsgId)    deletions.push(fetch(`${wh}/messages/${lowMsgId}`,    { method: 'DELETE' }).catch(() => {}));
+            await Promise.all(deletions);
+          }, DELETE_AFTER_MS);
         }
 
         prevHpMap[key] = r.last_hp;
@@ -184,6 +217,7 @@
       for (const key of Object.keys(prevHpMap)) {
         if (key.startsWith(`${boss.id}-`) && !currentKeys.has(key)) {
           delete prevHpMap[key];
+          delete pendingAlertMsgIds[key];
         }
       }
     }
