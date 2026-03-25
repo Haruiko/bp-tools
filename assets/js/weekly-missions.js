@@ -3,20 +3,48 @@
    Resets every Monday at 6:00 AM local time
    ------------------------------ */
 
-const TASKS = [
-  "Life Skill Quests",
-  "World Boss Crusade (1,200 Activity Points)",
-  "Friendship Point Support",
-  "Guild Dance",
-  "Guild Activity Rewards",
-  "Chaotic Realm Reforge Stones",
-  "Bane Lord",
-  "Pioneer Rewards",
-  "Dragon Shackles Raid",
-  "Stimen Vaults (Bi-Weekly)"
+const GROUPS = [
+  {
+    name: "Guild",
+    tasks: [
+      { text: "Guild Hunt (Fri, Sat, Sun)" },
+      { text: "Guild Dance (Friday)" },
+      { text: "Guild Activity Rewards" },
+    ]
+  },
+  {
+    name: "Dungeons",
+    tasks: [
+      { text: "World Boss Crusade (1,200 Activity Points)" },
+      { text: "Chaotic Realm Reforge Stones" },
+      { text: "Friendship Point Support" },
+      { text: "Bane Lord" },
+      { text: "Pioneer Rewards" },
+      { text: "Dragon Shackles Raid" },
+      { text: "Stimen Vaults (Bi-Weekly)" },
+    ]
+  },
+  {
+    name: "Life Skills",
+    tasks: [
+      { text: "Life Skill Quests", learnMore: "../weekly-lifestyle/" },
+    ]
+  },
+  {
+    name: "Shops",
+    tasks: [
+      { text: "Season Pass Shop" },
+      { text: "Orb Shop" },
+      { text: "Friendship Shop" },
+      { text: "Honor Coin Shop" },
+      { text: "Reputation Shop" },
+      { text: "Guild Shop" },
+      { text: "Gear Exchange" },
+    ]
+  }
 ];
 
-const KEY = "weekly-missions-v1";
+const KEY = "weekly-missions-v2";
 const META_KEY = "weekly-missions-meta";
 const RESET_HOUR = 6; // 6:00 AM local time
 
@@ -81,45 +109,58 @@ scheduleNextReset();
 
 /* --- Build checklist UI --- */
 const list = document.getElementById("missionList");
+let globalIdx = 0;
 
-TASKS.forEach((text, idx) => {
-  const id = `task-${idx}`;
-  const checked = !!saved[id];
+GROUPS.forEach(group => {
+  const header = document.createElement("div");
+  header.className = "group-header";
+  header.textContent = group.name;
+  list.appendChild(header);
 
-  const row = document.createElement("label");
-  row.className = `item${checked ? " done" : ""}`;
-  row.setAttribute("for", id);
+  const groupItems = document.createElement("div");
+  groupItems.className = "group-items";
+  list.appendChild(groupItems);
 
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.id = id;
-  box.checked = checked;
-  box.setAttribute("aria-label", text);
+  group.tasks.forEach(task => {
+    const id = `task-${globalIdx}`;
+    const checked = !!saved[id];
 
-  const span = document.createElement("span");
-  span.className = "label";
-  span.textContent = text;
+    const row = document.createElement("label");
+    row.className = `item${checked ? " done" : ""}`;
+    row.setAttribute("for", id);
 
-  row.appendChild(box);
-  row.appendChild(span);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = id;
+    box.checked = checked;
+    box.setAttribute("aria-label", task.text);
 
-  // Add 'Learn more' link for Life Skill Quests
-  if (idx === 0) {
-    const link = document.createElement("a");
-    link.href = "../weekly-lifestyle/";
-    link.className = "learn-more";
-    link.textContent = "Learn more";
-    link.addEventListener("click", e => e.stopPropagation());
-    row.appendChild(link);
-  }
+    const span = document.createElement("span");
+    span.className = "label";
+    span.textContent = task.text;
 
-  list.appendChild(row);
+    row.appendChild(box);
+    row.appendChild(span);
 
-  box.addEventListener("change", () => {
-    saved[id] = box.checked;
-    localStorage.setItem(KEY, JSON.stringify(saved));
-    row.classList.toggle("done", box.checked);
-    updateProgress();
+    if (task.learnMore) {
+      const link = document.createElement("a");
+      link.href = task.learnMore;
+      link.className = "learn-more";
+      link.textContent = "Learn more";
+      link.addEventListener("click", e => e.stopPropagation());
+      row.appendChild(link);
+    }
+
+    groupItems.appendChild(row);
+
+    box.addEventListener("change", () => {
+      saved[id] = box.checked;
+      localStorage.setItem(KEY, JSON.stringify(saved));
+      row.classList.toggle("done", box.checked);
+      updateProgress();
+    });
+
+    globalIdx++;
   });
 });
 

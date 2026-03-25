@@ -23,13 +23,13 @@ body {
   color: var(--text);
   min-height: 100vh;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 32px;
 }
 
 .card {
-  width: min(800px, 100%);
+  width: min(1060px, 100%);
   background: var(--panel);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 16px;
@@ -114,8 +114,30 @@ h1 {
 /* Checklist */
 .list {
   margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-header {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  padding: 18px 4px 8px;
+  border-bottom: 1px solid rgba(79,140,201,0.25);
+  margin-bottom: 8px;
+}
+
+.group-header:first-child {
+  padding-top: 4px;
+}
+
+.group-items {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .item {

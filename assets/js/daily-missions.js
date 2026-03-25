@@ -2,22 +2,47 @@
    Daily Missions with Auto-Reset
    ------------------------------ */
 
-const TASKS = [
-  "Unstable Space 2x",
-  "Elite Hunt Chest 2x",
-  "World Hunt Chest 2x",
-  "Season Pass Activity Merits",
-  "Bureau Commissions",
-  "Life Skill Focus",
-  "Leisure Activities",
-  "Homestead Commissions",
-  "World Boss Crusade",
-  "Guild Check-In",
-  "Guild Cargo",
-  "Guild Hunt ( Every Fri, Sat, Sun )",
+const GROUPS = [
+  {
+    name: "Main Activities",
+    tasks: [
+      "Unstable Space 2x",
+      "Elite Hunt Chest 2x",
+      "World Hunt Chest 2x",
+      "Season Pass Activity Merits",
+      "Bureau Commissions",
+      "Life Skill Focus",
+      "World Boss Crusade",
+    ]
+  },
+  {
+    name: "Guild",
+    tasks: [
+      "Guild Check-In",
+      "Guild Cargo",
+    ]
+  },
+  {
+    name: "Leisure",
+    tasks: [
+      "Leisure Activities",
+    ]
+  },
+  {
+    name: "Optional",
+    tasks: [
+      "Homestead Commissions",
+    ]
+  },
+  {
+    name: "Shops",
+    tasks: [
+      "Mystery Store",
+    ]
+  }
 ];
 
-const KEY = "daily-missions-v1";   // store check states
+const KEY = "daily-missions-v2";   // store check states
 const META_KEY = "daily-missions-meta"; // store last reset time
 const RESET_HOUR = 6; // 6:00 AM local time
 
@@ -80,35 +105,48 @@ scheduleNextReset();
 
 /* --- Build checklist UI --- */
 const list = document.getElementById("missionList");
+let globalIdx = 0;
 
-TASKS.forEach((text, idx) => {
-  const id = `task-${idx}`;
-  const checked = !!saved[id];
+GROUPS.forEach(group => {
+  const header = document.createElement("div");
+  header.className = "group-header";
+  header.textContent = group.name;
+  list.appendChild(header);
 
-  const row = document.createElement("label");
-  row.className = `item${checked ? " done" : ""}`;
-  row.setAttribute("for", id);
+  const groupItems = document.createElement("div");
+  groupItems.className = "group-items";
+  list.appendChild(groupItems);
 
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.id = id;
-  box.checked = checked;
-  box.setAttribute("aria-label", text);
+  group.tasks.forEach(text => {
+    const id = `task-${globalIdx}`;
+    const checked = !!saved[id];
 
-  const span = document.createElement("span");
-  span.className = "label";
-  span.textContent = text;
+    const row = document.createElement("label");
+    row.className = `item${checked ? " done" : ""}`;
+    row.setAttribute("for", id);
 
-  row.appendChild(box);
-  row.appendChild(span);
-  list.appendChild(row);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = id;
+    box.checked = checked;
+    box.setAttribute("aria-label", text);
 
-  // Save when toggled
-  box.addEventListener("change", () => {
-    saved[id] = box.checked;
-    localStorage.setItem(KEY, JSON.stringify(saved));
-    row.classList.toggle("done", box.checked);
-    updateProgress();
+    const span = document.createElement("span");
+    span.className = "label";
+    span.textContent = text;
+
+    row.appendChild(box);
+    row.appendChild(span);
+    groupItems.appendChild(row);
+
+    box.addEventListener("change", () => {
+      saved[id] = box.checked;
+      localStorage.setItem(KEY, JSON.stringify(saved));
+      row.classList.toggle("done", box.checked);
+      updateProgress();
+    });
+
+    globalIdx++;
   });
 });
 
