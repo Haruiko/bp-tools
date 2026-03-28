@@ -16,9 +16,6 @@
       ".read": true,
       ".write": false
     },
-    "union_members": {
-      ".read": true,
-      ".write": false
-    }
+
   }
 }

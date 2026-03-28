@@ -495,19 +495,6 @@ body {
 }
 .pt-profile-setup-btn:hover,
 .pt-profile-edit-btn:hover { background: var(--accent-dim); }
-.pt-get-members-btn {
-  background: transparent;
-  border: 1px solid #c9a227;
-  color: #c9a227;
-  border-radius: 6px;
-  padding: 5px 14px;
-  font-size: 0.85rem;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.pt-get-members-btn:hover { background: rgba(201,162,39,0.12); }
-.pt-get-members-btn:disabled { opacity: 0.55; cursor: default; }
 .pt-profile-actions {
   display: flex;
   gap: 6px;

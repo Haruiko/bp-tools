@@ -8,7 +8,7 @@ const FIREBASE_BASE  = 'https://bp-player-tracker-db-default-rtdb.asia-southeast
 const FIREBASE_URL          = FIREBASE_BASE + '/players.json';
 const GUILDS_FB_URL         = FIREBASE_BASE + '/guilds.json';
 const DELETED_GUILDS_FB_URL = FIREBASE_BASE + '/deleted_guilds.json';
-const UNION_MEMBERS_FB_URL  = FIREBASE_BASE + '/union_members.json';
+
 const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
 
 const PROFILE_KEY = 'pt_profile_v1'; // localStorage key for visitor profile (must persist between visits)
@@ -282,33 +282,6 @@ function removeGuildMember(name) {
 }
 function renderGuildTags() {
   if (viewSelect.value === 'guild') renderGuildPanel();
-}
-
-// ── Get Guild Members from Firebase ───────────────────────
-async function getGuildMembersFromFirebase() {
-  const btn = document.getElementById('pt-get-members-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Fetching…'; }
-  try {
-    const res = await fetch(UNION_MEMBERS_FB_URL);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data) { alert('No union members found in Firebase yet. Make sure BP-Player-Tracker is running.'); return; }
-
-    let added = 0;
-    for (const key of Object.keys(data)) {
-      const member = data[key];
-      const name = member?.name ?? member?.Name;
-      if (!name) continue;
-      const before = loadGuildMembers().length;
-      addGuildMember(name);
-      if (loadGuildMembers().length > before) added++;
-    }
-    alert(`Done! Added ${added} new member(s) to your guild.`);
-  } catch (err) {
-    alert(`Failed to fetch union members: ${err.message}`);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '⚔️ Get Guild Members'; }
-  }
 }
 
 
@@ -768,13 +741,11 @@ function renderProfileBar() {
         ${guild ? `<span class="pt-profile-guild-badge">⚔️ ${escHtml(guild.name)}</span>` : ''}
       </span>
       <span class="pt-profile-actions">
-        ${guild ? `<button class="pt-get-members-btn" id="pt-get-members-btn">⚔️ Get Guild Members</button>` : ''}
         <button class="pt-profile-edit-btn" id="pt-profile-btn">Edit</button>
         <button class="pt-profile-remove-btn" id="pt-profile-remove-btn">Remove</button>
       </span>`;
   }
   document.getElementById('pt-profile-btn')?.addEventListener('click', () => showProfileModal());
-  document.getElementById('pt-get-members-btn')?.addEventListener('click', getGuildMembersFromFirebase);
   document.getElementById('pt-profile-remove-btn')?.addEventListener('click', () => {
     if (!confirm('Remove your profile? This will not remove you from your guild.')) return;
     saveProfile(null);
