@@ -5,17 +5,21 @@
    ───────────────────────────────────────────── */
 
 const FIREBASE_URL = 'https://bp-player-tracker-db-default-rtdb.asia-southeast1.firebasedatabase.app/players.json';
-const POLL_MS      = 15_000;      // refresh every 15 s
-const RETRY_MS     = 30_000;      // retry after network error
+const RETRY_MS     = 10_000;      // SSE reconnect delay after connection loss
 
-const GUILD_KEY = 'pt_guild_members'; // localStorage key
-const CACHE_KEY = 'pt_players_cache'; // localStorage key for cached player data
+const GUILD_KEY   = 'pt_guild_members'; // localStorage key
+const CACHE_KEY   = 'pt_players_cache'; // localStorage key for cached player data
+const DAILY_KEY   = 'pt_daily_v1';      // localStorage key for daily stat tracking
 
 // ── DOM refs ───────────────────────────────────────────────
 const dot            = document.getElementById('pt-status-dot');
 const statusText     = document.getElementById('pt-status-text');
 const statusCount    = document.getElementById('pt-status-count');
 const statusTime     = document.getElementById('pt-status-time');
+const statTotal      = document.getElementById('pt-stat-total');
+const statScanned    = document.getElementById('pt-stat-scanned');
+const statNew        = document.getElementById('pt-stat-new');
+const statUpdated    = document.getElementById('pt-stat-updated');
 const notice         = document.getElementById('pt-notice');
 const tbody          = document.getElementById('pt-tbody');
 const searchInput    = document.getElementById('pt-search');
@@ -25,9 +29,10 @@ const refreshBtn     = document.getElementById('pt-refresh-btn');
 const actionHeader   = document.getElementById('pt-col-action-header');
 
 // ── State ──────────────────────────────────────────────────
-let allPlayers   = [];
-let pollTimer    = null;
-let isOnline     = false;
+let allPlayers      = [];
+let isOnline        = false;
+let eventSource     = null;   // Firebase SSE connection
+let reconnectTimer  = null;
 
 // ── Cache helpers ──────────────────────────────────────────
 function savePlayersCache(players) {
@@ -41,6 +46,78 @@ function loadPlayersCache() {
     const raw = localStorage.getItem(CACHE_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
+}
+
+// ── Daily stat tracking ────────────────────────────────────
+// Persists across page refreshes; resets at midnight.
+function getTodayStr() {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" in UTC
+}
+
+function loadDailyStats() {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    return s.date === getTodayStr() ? s : null; // discard if new day
+  } catch { return null; }
+}
+
+function saveDailyStats(s) {
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify(s)); } catch {}
+}
+
+// Called after every Firebase push. Diffs the new player list against the
+// daily baseline and accumulates scanned / new / updated counters.
+function accumulateDailyStats() {
+  let s = loadDailyStats();
+
+  if (!s) {
+    // First snapshot of the day — everything currently in DB is the baseline.
+    s = {
+      date:          getTodayStr(),
+      baselineNames: allPlayers.map(p => p.name),
+      scannedNames:  allPlayers.map(p => p.name),
+      newNames:      [],
+      updatedNames:  [],
+      lastScores:    Object.fromEntries(allPlayers.map(p => [p.name, p.abilityScore])),
+    };
+    saveDailyStats(s);
+    return { scanned: s.scannedNames.length, newP: 0, updated: 0 };
+  }
+
+  const baselineSet = new Set(s.baselineNames);
+  const scannedSet  = new Set(s.scannedNames);
+  const newSet      = new Set(s.newNames);
+  const updatedSet  = new Set(s.updatedNames);
+
+  for (const p of allPlayers) {
+    scannedSet.add(p.name);
+
+    if (!baselineSet.has(p.name)) {
+      // Player wasn't in DB at start of day → genuinely new
+      newSet.add(p.name);
+    } else if (
+      s.lastScores[p.name] !== undefined &&
+      s.lastScores[p.name] !== p.abilityScore
+    ) {
+      // Existing player with a changed ability score → updated
+      updatedSet.add(p.name);
+    }
+
+    s.lastScores[p.name] = p.abilityScore;
+  }
+
+  s.scannedNames = [...scannedSet];
+  s.newNames     = [...newSet];
+  s.updatedNames = [...updatedSet];
+  saveDailyStats(s);
+
+  return {
+    scanned: s.scannedNames.length,
+    newP:    s.newNames.length,
+    updated: s.updatedNames.length,
+  };
 }
 
 function timeAgo(isoStr) {
@@ -106,63 +183,79 @@ tbody.addEventListener('click', e => {
 refreshBtn.addEventListener('click', () => {
   refreshBtn.classList.add('spinning');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
-  fetchPlayers();
+  connectRealtime();
 });
 
-fetchPlayers();
+connectRealtime();
 
-// ── Fetch ──────────────────────────────────────────────────
-async function fetchPlayers() {
+// ── Real-time connection (Firebase SSE) ──────────────────────────
+// Firebase Realtime Database pushes 'put' events over SSE whenever
+// data changes, so the page updates the instant the exe writes.
+function connectRealtime() {
+  clearTimeout(reconnectTimer);
+  if (eventSource) { eventSource.close(); eventSource = null; }
+
   setStatus('loading', 'Connecting…');
 
-  try {
-    const res = await fetch(FIREBASE_URL, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  eventSource = new EventSource(FIREBASE_URL);
 
-    const data = await res.json();
+  // Initial snapshot + every subsequent change pushed by Firebase
+  eventSource.addEventListener('put', (e) => {
+    try {
+      const payload = JSON.parse(e.data);
+      if (payload && payload.data) handleData(payload.data);
+    } catch { /* malformed event */ }
+  });
 
-    if (data.error) {
-      setStatus('offline', `Server error: ${data.error}`);
-      showNotice(true);
-      schedule(RETRY_MS);
-      return;
-    }
+  // Partial update — do a one-shot REST fetch for simplicity
+  eventSource.addEventListener('patch', () => fetchOnce());
 
-    allPlayers = data.players ?? [];
-    isOnline   = true;
-    savePlayersCache(allPlayers);
-
-    setStatus('online',
-      'Live — last updated ' + timeAgo(data.updatedAt),
-      allPlayers.length,
-      data.updatedAt
-    );
-    showNotice(false);
-    render(allPlayers);
-    schedule(POLL_MS);
-
-  } catch {
+  eventSource.onerror = () => {
+    eventSource.close();
+    eventSource = null;
     isOnline = false;
 
-    // Try to show cached data while offline
     const cached = loadPlayersCache();
     if (cached && allPlayers.length === 0) {
       allPlayers = cached.players;
+      render(allPlayers);
       const savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString() : '?';
-      setStatus('offline', `No internet — showing cached data from ${savedAt}`);
+      setStatus('offline', `Connection lost — showing cached data from ${savedAt}`);
     } else {
-      setStatus('offline', 'Cannot reach server — no cached data available');
+      setStatus('offline', 'Connection lost — reconnecting…');
     }
     showNotice(true);
 
-    if (allPlayers.length === 0) {
-      tbody.innerHTML = '<tr class="pt-empty-row"><td colspan="5">No data yet — start BP-Player-Tracker.exe</td></tr>';
-    } else {
-      render(allPlayers);
-    }
+    reconnectTimer = setTimeout(connectRealtime, RETRY_MS);
+  };
+}
 
-    schedule(RETRY_MS);
+// One-shot REST fetch used for patch events
+async function fetchOnce() {
+  try {
+    const res = await fetch(FIREBASE_URL, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && !data.error) handleData(data);
+  } catch { /* SSE will handle reconnect */ }
+}
+
+// Shared handler for both SSE put payloads and REST responses
+function handleData(data) {
+  if (data.error) {
+    setStatus('offline', `Server error: ${data.error}`);
+    showNotice(true);
+    return;
   }
+
+  allPlayers = data.players ?? [];
+  isOnline   = true;
+  savePlayersCache(allPlayers);
+
+  updateStats(data);
+  setStatus('online', 'Live — last updated ' + timeAgo(data.updatedAt), null, data.updatedAt);
+  showNotice(false);
+  render(allPlayers);
 }
 
 // ── Render table ───────────────────────────────────────────
@@ -265,13 +358,21 @@ function render(players) {
 }
 
 // ── Helpers ────────────────────────────────────────────────
+function updateStats(data) {
+  const total = data.totalPlayers ?? data.total_players ?? allPlayers.length;
+  const { scanned, newP, updated } = accumulateDailyStats();
+
+  if (statTotal)   statTotal.textContent   = Number(total).toLocaleString();
+  if (statScanned) statScanned.textContent = scanned.toLocaleString();
+  if (statNew)     statNew.textContent     = newP.toLocaleString();
+  if (statUpdated) statUpdated.textContent = updated.toLocaleString();
+}
+
 function setStatus(state, text, count, updatedAt) {
   dot.className = `pt-status-dot ${state}`;
   statusText.textContent = text;
 
-  statusCount.textContent = count != null
-    ? `${count} player${count !== 1 ? 's' : ''}`
-    : '';
+  statusCount.textContent = '';
 
   statusTime.textContent = updatedAt
     ? `Updated ${new Date(updatedAt).toLocaleTimeString()}`
@@ -280,11 +381,6 @@ function setStatus(state, text, count, updatedAt) {
 
 function showNotice(show) {
   notice.hidden = !show;
-}
-
-function schedule(ms) {
-  clearTimeout(pollTimer);
-  pollTimer = setTimeout(fetchPlayers, ms);
 }
 
 function escHtml(str) {
