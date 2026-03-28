@@ -10,6 +10,8 @@ const RETRY_MS     = 10_000;      // SSE reconnect delay after connection loss
 const GUILD_KEY   = 'pt_guild_members'; // localStorage key
 const CACHE_KEY   = 'pt_players_cache'; // localStorage key for cached player data
 const DAILY_KEY   = 'pt_daily_v1';      // localStorage key for daily stat tracking
+const PROFILE_KEY = 'pt_profile_v1';   // localStorage key for visitor profile
+const GUILDS_KEY  = 'pt_guilds_v1';    // localStorage key for guild registry
 
 // ── DOM refs ───────────────────────────────────────────────
 const dot            = document.getElementById('pt-status-dot');
@@ -32,7 +34,9 @@ const actionHeader   = document.getElementById('pt-col-action-header');
 let allPlayers      = [];
 let isOnline        = false;
 let eventSource     = null;   // Firebase SSE connection
-let reconnectTimer  = null;
+let reconnectTimer      = null;
+let modalSelectedGuild  = null; // guild selected inside the profile modal
+let modalSelectedPlayer = null; // player record selected from DB search
 
 // ── Cache helpers ──────────────────────────────────────────
 function savePlayersCache(players) {
@@ -129,32 +133,95 @@ function timeAgo(isoStr) {
   return `${hrs}h ${mins % 60}m ago`;
 }
 
-// ── Guild helpers ──────────────────────────────────────────
-function loadGuildMembers() {
-  try { return JSON.parse(localStorage.getItem(GUILD_KEY) || '[]'); }
+// ── Profile helpers ─────────────────────────────────────────
+function loadProfile() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null'); }
+  catch { return null; }
+}
+function saveProfile(p) {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {}
+}
+
+// ── Guild registry ─────────────────────────────────────────
+function loadGuilds() {
+  try { return JSON.parse(localStorage.getItem(GUILDS_KEY) || '[]'); }
   catch { return []; }
 }
-
-function saveGuildMembers(list) {
-  localStorage.setItem(GUILD_KEY, JSON.stringify(list));
+function saveGuilds(guilds) {
+  try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
+}
+function getGuildById(id) {
+  return loadGuilds().find(g => g.id === id) ?? null;
+}
+function createGuild(name, id) {
+  const guilds = loadGuilds();
+  const guild = { id, name, members: [] };
+  guilds.push(guild);
+  saveGuilds(guilds);
+  return guild;
 }
 
+// Attach the visitor's own name to a guild's members list and update their profile.
+function joinGuild(guildId) {
+  const profile = loadProfile();
+  const myName  = profile?.inGameName;
+  const guilds  = loadGuilds();
+
+  // Remove self from any previous guild
+  const prevId = profile?.guildId;
+  if (prevId && prevId !== guildId) {
+    const prevIdx = guilds.findIndex(g => g.id === prevId);
+    if (prevIdx !== -1 && myName) {
+      guilds[prevIdx].members = guilds[prevIdx].members
+        .filter(n => n.toLowerCase() !== myName.toLowerCase());
+    }
+  }
+
+  // Add self to new guild
+  const idx = guilds.findIndex(g => g.id === guildId);
+  if (idx !== -1 && myName) {
+    if (!guilds[idx].members.some(n => n.toLowerCase() === myName.toLowerCase())) {
+      guilds[idx].members.push(myName);
+    }
+  }
+
+  saveGuilds(guilds);
+  saveProfile({ ...profile, guildId });
+}
+
+// ── Guild member helpers (operate on current user’s guild) ───
+function loadGuildMembers() {
+  const profile = loadProfile();
+  if (!profile?.guildId) return [];
+  return getGuildById(profile.guildId)?.members ?? [];
+}
+function saveGuildMembers(list) {
+  const profile = loadProfile();
+  if (!profile?.guildId) return;
+  const guilds = loadGuilds();
+  const idx = guilds.findIndex(g => g.id === profile.guildId);
+  if (idx === -1) return;
+  guilds[idx].members = list;
+  saveGuilds(guilds);
+}
 function addGuildMember(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
   const list = loadGuildMembers();
-  if (list.some(n => n.toLowerCase() === trimmed.toLowerCase())) return; // already in list
+  if (list.some(n => n.toLowerCase() === trimmed.toLowerCase())) return;
   list.push(trimmed);
   saveGuildMembers(list);
   renderGuildTags();
   render(allPlayers);
 }
-
 function removeGuildMember(name) {
   const list = loadGuildMembers().filter(n => n.toLowerCase() !== name.toLowerCase());
   saveGuildMembers(list);
   renderGuildTags();
   render(allPlayers);
+}
+function renderGuildTags() {
+  if (viewSelect.value === 'guild') renderGuildPanel();
 }
 
 
@@ -163,6 +230,11 @@ function removeGuildMember(name) {
 searchInput.addEventListener('input', () => render(allPlayers));
 sortSelect.addEventListener('change', () => render(allPlayers));
 viewSelect.addEventListener('change', () => {
+  const panel = document.getElementById('pt-guild-panel');
+  if (panel) {
+    panel.hidden = viewSelect.value !== 'guild';
+    if (viewSelect.value === 'guild') renderGuildPanel();
+  }
   render(allPlayers);
 });
 
@@ -187,6 +259,9 @@ refreshBtn.addEventListener('click', () => {
 });
 
 connectRealtime();
+renderProfileBar();
+initProfileModal();
+if (!loadProfile()) showProfileModal();
 
 // ── Real-time connection (Firebase SSE) ──────────────────────────
 // Firebase Realtime Database pushes 'put' events over SSE whenever
@@ -309,6 +384,8 @@ function render(players) {
     return;
   }
 
+  const profile      = loadProfile();
+  const hasGuild     = !!(profile?.guildId);
   const guildMembers = loadGuildMembers().map(n => n.toLowerCase());
 
   tbody.innerHTML = list.map((p, i) => {
@@ -328,10 +405,10 @@ function render(players) {
                   title="Remove from guild">−</button>
         </td>`
       : `<td class="pt-col-action">
-          <button class="pt-add-guild-btn${alreadyInGuild ? ' pt-add-guild-btn--added' : ''}"
+          <button class="pt-add-guild-btn${alreadyInGuild ? ' pt-add-guild-btn--added' : !hasGuild ? ' pt-add-guild-btn--no-guild' : ''}"
                   data-name="${escHtml(p.name)}"
-                  title="Add to guild"
-                  ${alreadyInGuild ? 'disabled' : ''}>
+                  title="${alreadyInGuild ? 'Already in your guild' : !hasGuild ? 'Join a guild first' : 'Add to my guild'}"
+                  ${alreadyInGuild || !hasGuild ? 'disabled' : ''}>
             ${alreadyInGuild ? '✓' : '+'}
           </button>
         </td>`;
@@ -389,4 +466,303 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ── Guild panel ────────────────────────────────────────────
+function renderGuildPanel() {
+  const panel = document.getElementById('pt-guild-panel');
+  if (!panel) return;
+
+  const profile        = loadProfile();
+  const currentGuildId = profile?.guildId ?? null;
+  const guilds         = loadGuilds();
+  const currentGuild   = currentGuildId ? guilds.find(g => g.id === currentGuildId) : null;
+
+  panel.innerHTML = `
+    <div class="pt-guild-panel-inner" style="grid-template-columns:1fr">
+      <div class="pt-guild-col">
+        ${currentGuild ? `
+          <h3 class="pt-guild-col-title">Your Guild</h3>
+          <div class="pt-guild-list-item pt-guild-list-item--active" style="margin-bottom:16px">
+            <div class="pt-guild-list-info">
+              <span class="pt-guild-list-name">${escHtml(currentGuild.name)}</span>
+              <span class="pt-guild-list-meta">ID: ${escHtml(currentGuild.id)} · ${currentGuild.members.length} member${currentGuild.members.length !== 1 ? 's' : ''}</span>
+            </div>
+            <button class="pt-guild-leave-btn" data-gid="${escHtml(currentGuild.id)}">Leave</button>
+          </div>
+        ` : ''}
+
+        <h3 class="pt-guild-col-title">
+          ${currentGuild ? 'Find Another Guild' : 'Guilds'}
+          <span class="pt-guild-col-count">${guilds.length}</span>
+        </h3>
+        <input type="search" class="pt-guild-search" id="pt-guild-list-search"
+               placeholder="${currentGuild ? 'Search to find other guilds…' : 'Search guilds…'}" />
+        <div class="pt-guild-list" id="pt-guild-list">
+          ${guilds.length === 0
+            ? `<p class="pt-guild-empty">No guilds yet — set up your profile to create one.</p>`
+            : guilds
+                .filter(g => g.id !== currentGuildId) // hide current guild here
+                .map(g => `
+                  <div class="pt-guild-list-item" style="display:none" data-guild-item>
+                    <div class="pt-guild-list-info">
+                      <span class="pt-guild-list-name">${escHtml(g.name)}</span>
+                      <span class="pt-guild-list-meta">ID: ${escHtml(g.id)} · ${g.members.length} member${g.members.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    ${currentGuild
+                      ? `<span class="pt-guild-join-locked" title="Leave your current guild first">Leave first</span>`
+                      : `<button class="pt-guild-join-btn" data-gid="${escHtml(g.id)}">Join</button>`
+                    }
+                  </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Search reveals other guilds (hidden by default)
+  document.getElementById('pt-guild-list-search').addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('#pt-guild-list [data-guild-item]').forEach(el => {
+      const name = el.querySelector('.pt-guild-list-name').textContent.toLowerCase();
+      el.style.display = q && name.includes(q) ? '' : 'none';
+    });
+  });
+
+  // Leave button
+  panel.querySelector('.pt-guild-leave-btn')?.addEventListener('click', (e) => {
+    const gid     = e.currentTarget.dataset.gid;
+    const p       = loadProfile();
+    const myName  = p?.inGameName;
+    const guilds  = loadGuilds();
+    const idx     = guilds.findIndex(g => g.id === gid);
+    if (idx !== -1 && myName) {
+      guilds[idx].members = guilds[idx].members.filter(n => n.toLowerCase() !== myName.toLowerCase());
+      saveGuilds(guilds);
+    }
+    saveProfile({ ...p, guildId: null });
+    renderGuildPanel();
+    renderProfileBar();
+    render(allPlayers);
+  });
+
+  // Join buttons (only shown when user has no current guild)
+  panel.querySelectorAll('.pt-guild-join-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!loadProfile()?.inGameName) return;
+      joinGuild(btn.dataset.gid);
+      renderGuildPanel();
+      renderProfileBar();
+      render(allPlayers);
+    });
+  });
+}
+
+// ── Profile bar ────────────────────────────────────────────
+function renderProfileBar() {
+  const bar = document.getElementById('pt-profile-bar');
+  if (!bar) return;
+  const profile = loadProfile();
+  if (!profile) {
+    bar.innerHTML = `<button class="pt-profile-setup-btn" id="pt-profile-btn">👤 Set up your profile</button>`;
+  } else {
+    const guild = profile.guildId ? getGuildById(profile.guildId) : null;
+    bar.innerHTML = `
+      <span class="pt-profile-info">
+        <span class="pt-profile-avatar">👤</span>
+        <span class="pt-profile-name">${escHtml(profile.inGameName)}</span>
+        ${guild ? `<span class="pt-profile-guild-badge">⚔️ ${escHtml(guild.name)}</span>` : ''}
+      </span>
+      <button class="pt-profile-edit-btn" id="pt-profile-btn">Edit</button>`;
+  }
+  document.getElementById('pt-profile-btn')?.addEventListener('click', () => showProfileModal());
+}
+
+// ── Profile modal ──────────────────────────────────────────
+function showProfileModal() {
+  const modal       = document.getElementById('pt-profile-modal');
+  if (!modal) return;
+  const profile     = loadProfile();
+  const nameInput   = document.getElementById('pt-profile-name');
+  const guildInput  = document.getElementById('pt-profile-guild-input');
+  const guildIdRow  = document.getElementById('pt-profile-guild-id-row');
+  const guildSec    = document.getElementById('pt-profile-guild-section');
+  const nameHint    = document.getElementById('pt-modal-name-hint');
+
+  modalSelectedGuild  = null;
+  modalSelectedPlayer = null;
+
+  nameInput.value  = profile?.inGameName ?? '';
+  nameHint.hidden  = true;
+
+  // Pre-fill guild if profile already has one
+  if (profile?.guildId && guildInput) {
+    const g = getGuildById(profile.guildId);
+    if (g) { guildInput.value = g.name; modalSelectedGuild = g; }
+    else guildInput.value = '';
+  } else if (guildInput) {
+    guildInput.value = '';
+  }
+  if (guildIdRow) guildIdRow.hidden = true;
+
+  // If the saved name exists in DB, show guild section immediately
+  if (profile?.inGameName) {
+    const match = allPlayers.find(p => p.name.toLowerCase() === profile.inGameName.toLowerCase());
+    if (match) {
+      modalSelectedPlayer = match;
+      if (guildSec) guildSec.hidden = false;
+    } else {
+      if (guildSec) guildSec.hidden = true;
+    }
+  } else {
+    if (guildSec) guildSec.hidden = true;
+  }
+
+  modal.removeAttribute('hidden');
+  nameInput.focus();
+}
+
+function hideProfileModal() {
+  const modal = document.getElementById('pt-profile-modal');
+  if (modal) modal.setAttribute('hidden', '');
+}
+
+function initProfileModal() {
+  const modal       = document.getElementById('pt-profile-modal');
+  const nameInput   = document.getElementById('pt-profile-name');
+  const nameDropdown= document.getElementById('pt-name-dropdown');
+  const guildInput  = document.getElementById('pt-profile-guild-input');
+  const guildIdRow  = document.getElementById('pt-profile-guild-id-row');
+  const guildDropdown = document.getElementById('pt-guild-dropdown');
+  const guildSec    = document.getElementById('pt-profile-guild-section');
+  const nameHint    = document.getElementById('pt-modal-name-hint');
+  const saveBtn     = document.getElementById('pt-profile-save');
+  if (!modal) return;
+
+  // ── Name search against allPlayers ──
+  nameInput.addEventListener('input', () => {
+    const q = nameInput.value.trim().toLowerCase();
+    nameInput.classList.remove('pt-modal-input--error');
+
+    if (!q) {
+      nameDropdown.hidden      = true;
+      nameHint.hidden          = true;
+      if (guildSec) guildSec.hidden = true;
+      modalSelectedPlayer      = null;
+      return;
+    }
+
+    const matches = allPlayers.filter(p => p.name.toLowerCase().includes(q));
+
+    if (matches.length === 0) {
+      nameDropdown.hidden = true;
+      nameHint.hidden     = false;
+      // No DB data — hide guild section
+      if (guildSec) guildSec.hidden = true;
+      modalSelectedPlayer = null;
+      return;
+    }
+
+    nameHint.hidden     = false; // also show hint so they know they can still just type
+    nameDropdown.hidden = false;
+    nameDropdown.innerHTML = matches.slice(0, 12).map(p =>
+      `<div class="pt-dropdown-item" data-name="${escHtml(p.name)}">
+        <span>${escHtml(p.name)}</span>
+        <span class="pt-dropdown-meta">Lv ${p.level} · ${p.abilityScore.toLocaleString()} AS</span>
+      </div>`
+    ).join('');
+
+    nameDropdown.querySelectorAll('.pt-dropdown-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const selected = allPlayers.find(p => p.name === el.dataset.name);
+        if (!selected) return;
+        modalSelectedPlayer      = selected;
+        nameInput.value          = selected.name;
+        nameDropdown.hidden      = true;
+        nameHint.hidden          = true;
+        // Player found in DB — reveal guild section
+        if (guildSec) guildSec.hidden = false;
+      });
+    });
+  });
+
+  // ── Guild name autocomplete ──
+  if (guildInput) {
+    guildInput.addEventListener('input', () => {
+      const q      = guildInput.value.trim().toLowerCase();
+      const guilds = loadGuilds();
+      const matches    = q ? guilds.filter(g => g.name.toLowerCase().includes(q)) : guilds;
+      const exactMatch = guilds.find(g => g.name.toLowerCase() === q);
+
+      modalSelectedGuild = exactMatch ?? null;
+      if (guildIdRow) guildIdRow.hidden = !!exactMatch || !q;
+
+      if (matches.length === 0) { if (guildDropdown) guildDropdown.hidden = true; return; }
+
+      if (guildDropdown) {
+        guildDropdown.hidden = false;
+        guildDropdown.innerHTML = matches.map(g =>
+          `<div class="pt-dropdown-item" data-id="${escHtml(g.id)}">
+            ${escHtml(g.name)}
+            <span class="pt-dropdown-meta">${g.members.length} member${g.members.length !== 1 ? 's' : ''}</span>
+          </div>`
+        ).join('');
+        guildDropdown.querySelectorAll('.pt-dropdown-item').forEach(el => {
+          el.addEventListener('click', () => {
+            const g = loadGuilds().find(x => x.id === el.dataset.id);
+            if (!g) return;
+            modalSelectedGuild     = g;
+            guildInput.value       = g.name;
+            guildDropdown.hidden   = true;
+            if (guildIdRow) guildIdRow.hidden = true;
+          });
+        });
+      }
+    });
+  }
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.pt-autocomplete-wrapper')) {
+      if (nameDropdown)  nameDropdown.hidden  = true;
+      if (guildDropdown) guildDropdown.hidden = true;
+    }
+  });
+
+  // Close modal on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) hideProfileModal();
+  });
+
+  // ── Save ──
+  saveBtn.addEventListener('click', () => {
+    const guildIdInput = document.getElementById('pt-profile-guild-id');
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      nameInput.classList.add('pt-modal-input--error');
+      return;
+    }
+    nameInput.classList.remove('pt-modal-input--error');
+
+    const guildText = guildInput ? guildInput.value.trim() : '';
+    let guildId = modalSelectedGuild?.id ?? null;
+
+    // Only create/join a guild if the player has DB data and typed a guild name
+    if (guildText && !modalSelectedGuild && modalSelectedPlayer) {
+      const rawId   = guildIdInput ? guildIdInput.value.trim() : '';
+      const idToUse = rawId || `guild-${Date.now().toString(36)}`;
+      const guilds  = loadGuilds();
+      const finalId = guilds.some(g => g.id === idToUse)
+        ? `${idToUse}-${Math.random().toString(36).slice(2, 5)}`
+        : idToUse;
+      guildId = createGuild(guildText, finalId).id;
+    }
+
+    saveProfile({ inGameName: name, guildId });
+    if (guildId) joinGuild(guildId);
+    hideProfileModal();
+    renderProfileBar();
+    if (viewSelect.value === 'guild') renderGuildPanel();
+    render(allPlayers);
+  });
 }

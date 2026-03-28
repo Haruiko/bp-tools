@@ -16,6 +16,9 @@
       <p class="pt-page-sub">Global ranking by Ability Score and Illusion Strength</p>
     </div>
 
+    <!-- Visitor profile bar -->
+    <div class="pt-profile-bar" id="pt-profile-bar"></div>
+
     <!-- Status bar -->
     <div class="pt-status-bar" id="pt-status-bar">
       <span class="pt-status-dot" id="pt-status-dot"></span>
@@ -71,10 +74,13 @@
       <label class="pt-sort-label" for="pt-view">View:</label>
       <select id="pt-view" class="pt-sort-select" aria-label="View filter">
         <option value="all">All Players</option>
-        <option value="guild">Guild Members</option>
+        <option value="guild">Guild</option>
       </select>
       <button class="pt-refresh-btn" id="pt-refresh-btn" title="Refresh now">↺</button>
     </div>
+
+    <!-- Guild panel — shown when Guild view is active -->
+    <div class="pt-guild-panel" id="pt-guild-panel" hidden></div>
 
     <!-- Player table -->
     <div class="pt-table-wrapper" id="pt-table-wrapper">
@@ -102,6 +108,48 @@
       Data is refreshed every 15 seconds from ZDPS's entity cache.
     </p>
 
+  </div>
+
+  <!-- Profile / identity modal -->
+  <div class="pt-modal-overlay" id="pt-profile-modal" hidden>
+    <div class="pt-modal">
+      <div class="pt-modal-header">
+        <h2 class="pt-modal-title">👤 Your Profile</h2>
+        <p class="pt-modal-sub">Set your in-game name to personalize your experience.</p>
+      </div>
+      <div class="pt-modal-body">
+        <label class="pt-modal-label">In-game Name <span class="pt-modal-required">*</span></label>
+        <div class="pt-autocomplete-wrapper">
+          <input type="text" id="pt-profile-name" class="pt-modal-input"
+                 placeholder="Search your character name…" autocomplete="off" />
+          <div class="pt-dropdown" id="pt-name-dropdown" hidden></div>
+        </div>
+        <p class="pt-modal-name-hint" id="pt-modal-name-hint" hidden>
+          👍 No match? Just type your name and save.
+        </p>
+
+        <div id="pt-profile-guild-section" hidden>
+          <label class="pt-modal-label">Guild <span class="pt-modal-hint">(optional)</span></label>
+          <div class="pt-autocomplete-wrapper">
+            <input type="text" id="pt-profile-guild-input" class="pt-modal-input"
+                   placeholder="Search existing or type a new guild name…" autocomplete="off" />
+            <div class="pt-dropdown" id="pt-guild-dropdown" hidden></div>
+          </div>
+
+          <div id="pt-profile-guild-id-row" hidden>
+            <label class="pt-modal-label">
+              Guild ID
+              <span class="pt-modal-hint">(new guild — leave blank to auto-generate)</span>
+            </label>
+            <input type="text" id="pt-profile-guild-id" class="pt-modal-input"
+                   placeholder="e.g. luno-alliance" autocomplete="off" />
+          </div>
+        </div>
+      </div>
+      <div class="pt-modal-footer">
+        <button class="pt-modal-save-btn" id="pt-profile-save">Save Profile</button>
+      </div>
+    </div>
   </div>
 
   <script src="../assets/js/player-tracker.js"></script>
