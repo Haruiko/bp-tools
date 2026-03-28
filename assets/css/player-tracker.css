@@ -221,8 +221,24 @@ body {
 
 /* ── Guild panel ── */
 /* Add/remove guild buttons in table rows */
-.pt-col-action { width: 36px; text-align: center; padding: 0 8px !important; }
-.pt-col-action-header { width: 36px; }
+.pt-col-action { width: 120px; text-align: center; padding: 0 8px !important; }
+.pt-table th.pt-col-action { text-align: center; }
+
+/* Guild name badge shown when a player belongs to a guild */
+.pt-guild-badge {
+  display: inline-block;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(149,102,229,0.15);
+  color: #b48ef5;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  vertical-align: middle;
+}
 
 .pt-add-guild-btn {
   width: 26px;
@@ -345,6 +361,14 @@ body {
   padding: 2px 8px;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+/* Season level suffix shown inside the level pill */
+.pt-season-level {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-left: 3px;
 }
 
 /* Ability score */

@@ -4,8 +4,10 @@
    (served by BP-Player-Tracker.exe)
    ───────────────────────────────────────────── */
 
-const FIREBASE_URL = 'https://bp-player-tracker-db-default-rtdb.asia-southeast1.firebasedatabase.app/players.json';
-const RETRY_MS     = 10_000;      // SSE reconnect delay after connection loss
+const FIREBASE_BASE  = 'https://bp-player-tracker-db-default-rtdb.asia-southeast1.firebasedatabase.app';
+const FIREBASE_URL   = FIREBASE_BASE + '/players.json';
+const GUILDS_FB_URL  = FIREBASE_BASE + '/guilds.json';
+const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
 
 const GUILD_KEY   = 'pt_guild_members'; // localStorage key
 const CACHE_KEY   = 'pt_players_cache'; // localStorage key for cached player data
@@ -147,8 +149,55 @@ function loadGuilds() {
   try { return JSON.parse(localStorage.getItem(GUILDS_KEY) || '[]'); }
   catch { return []; }
 }
+
+// Firebase uses objects keyed by ID; convert at the boundary
+function guildsToFbObj(guilds) {
+  const obj = {};
+  guilds.forEach(g => { obj[g.id] = g; });
+  return obj;
+}
+function fbObjToGuilds(obj) {
+  if (!obj || typeof obj !== 'object') return [];
+  return Object.values(obj);
+}
+
+async function fetchGuildsFromFirebase() {
+  try {
+    const res = await fetch(GUILDS_FB_URL);
+    if (!res.ok) return;
+    const obj = await res.json();
+    const fbGuilds = fbObjToGuilds(obj);
+    // Merge: Firebase is authoritative; append any purely local guilds not yet pushed
+    const localGuilds = loadGuilds();
+    const fbIds = new Set(fbGuilds.map(g => g.id));
+    const localOnly = localGuilds.filter(g => !fbIds.has(g.id));
+    localOnly.forEach(g => fbGuilds.push(g));
+    try { localStorage.setItem(GUILDS_KEY, JSON.stringify(fbGuilds)); } catch {}
+    // Push any local-only guilds up to Firebase so they become visible to others
+    if (localOnly.length > 0) pushGuildsToFirebase(localOnly);
+  } catch { /* offline — fall back to localStorage */ }
+}
+
+async function pushGuildsToFirebase(guilds) {
+  try {
+    // PATCH merges into existing data — won't overwrite other users' guilds
+    const res = await fetch(GUILDS_FB_URL, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(guildsToFbObj(guilds)),
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => '');
+      console.warn('[PlayerTracker] Guild sync failed (', res.status, '):', msg);
+    }
+  } catch (err) {
+    console.warn('[PlayerTracker] Guild sync error:', err);
+  }
+}
+
 function saveGuilds(guilds) {
   try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
+  pushGuildsToFirebase(guilds); // sync to Firebase in the background
 }
 function getGuildById(id) {
   return loadGuilds().find(g => g.id === id) ?? null;
@@ -258,10 +307,15 @@ refreshBtn.addEventListener('click', () => {
   connectRealtime();
 });
 
-connectRealtime();
-renderProfileBar();
-initProfileModal();
-if (!loadProfile()) showProfileModal();
+// Fetch shared guild data from Firebase before booting the UI
+async function init() {
+  await fetchGuildsFromFirebase();
+  renderProfileBar();
+  initProfileModal();
+  if (!loadProfile()) showProfileModal();
+  connectRealtime();
+}
+init();
 
 // ── Real-time connection (Firebase SSE) ──────────────────────────
 // Firebase Realtime Database pushes 'put' events over SSE whenever
@@ -388,6 +442,15 @@ function render(players) {
   const hasGuild     = !!(profile?.guildId);
   const guildMembers = loadGuildMembers().map(n => n.toLowerCase());
 
+  // Build a name → guild name lookup from all known guilds
+  const allGuilds = loadGuilds();
+  const playerGuildMap = {}; // lowercase name → guild name
+  allGuilds.forEach(g => {
+    (g.members || []).forEach(m => {
+      playerGuildMap[m.toLowerCase()] = g.name;
+    });
+  });
+
   tbody.innerHTML = list.map((p, i) => {
     const rank      = i + 1;
     const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
@@ -398,6 +461,7 @@ function render(players) {
       ? `<span class="pt-illusion">✶ ${p.illusionStrength.toLocaleString()}</span>`
       : '';
     const alreadyInGuild = guildMembers.includes(p.name.toLowerCase());
+    const playerGuildName = playerGuildMap[p.name.toLowerCase()] ?? null;
     const actionCell = isGuild
       ? `<td class="pt-col-action">
           <button class="pt-remove-guild-btn"
@@ -405,12 +469,15 @@ function render(players) {
                   title="Remove from guild">−</button>
         </td>`
       : `<td class="pt-col-action">
-          <button class="pt-add-guild-btn${alreadyInGuild ? ' pt-add-guild-btn--added' : !hasGuild ? ' pt-add-guild-btn--no-guild' : ''}"
+          ${playerGuildName
+            ? `<span class="pt-guild-badge" title="Guild: ${escHtml(playerGuildName)}">${escHtml(playerGuildName)}</span>`
+            : `<button class="pt-add-guild-btn${!hasGuild ? ' pt-add-guild-btn--no-guild' : ''}"
                   data-name="${escHtml(p.name)}"
-                  title="${alreadyInGuild ? 'Already in your guild' : !hasGuild ? 'Join a guild first' : 'Add to my guild'}"
-                  ${alreadyInGuild || !hasGuild ? 'disabled' : ''}>
-            ${alreadyInGuild ? '✓' : '+'}
-          </button>
+                  title="${!hasGuild ? 'Join a guild first' : 'Add to my guild'}"
+                  ${!hasGuild ? 'disabled' : ''}>
+              +
+            </button>`
+          }
         </td>`;
 
     return `
@@ -422,7 +489,7 @@ function render(players) {
           <span class="pt-name">${escHtml(p.name)}</span>
         </td>
         <td class="pt-col-level">
-          <span class="pt-level">${p.level}</span>
+          <span class="pt-level">${p.level}${p.seasonLevel > 0 ? `<span class="pt-season-level">(+${p.seasonLevel})</span>` : ''}</span>
         </td>
         <td class="pt-col-as">
           <span class="pt-as-row">
@@ -667,7 +734,7 @@ function initProfileModal() {
     nameDropdown.innerHTML = matches.slice(0, 12).map(p =>
       `<div class="pt-dropdown-item" data-name="${escHtml(p.name)}">
         <span>${escHtml(p.name)}</span>
-        <span class="pt-dropdown-meta">Lv ${p.level} · ${p.abilityScore.toLocaleString()} AS</span>
+        <span class="pt-dropdown-meta">Lv ${p.level}${p.seasonLevel > 0 ? `(+${p.seasonLevel})` : ''} · ${p.abilityScore.toLocaleString()} AS</span>
       </div>`
     ).join('');
 

@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "players": {
+      ".read": true,
+      ".write": false
+    },
+    "guilds": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
