@@ -216,8 +216,8 @@ body {
   line-height: 1;
 }
 .pt-refresh-btn:hover { background: var(--accent-dim); border-color: var(--accent); }
-.pt-refresh-btn.spinning { animation: spin 0.6s linear; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.pt-refresh-btn.spinning .pt-refresh-icon { display: inline-block; animation: spin-ccw 0.6s linear; }
+@keyframes spin-ccw { to { transform: rotate(-360deg); } }
 
 .pt-clear-cache-btn {
   background: var(--bg-panel);
@@ -554,11 +554,12 @@ body {
 }
 .pt-modal-input:focus       { border-color: var(--accent); }
 .pt-modal-input--error      { border-color: var(--danger); }
+.pt-modal-input--locked     { background: rgba(180,142,245,0.08); cursor: default; }
 .pt-modal-input::placeholder { color: var(--text-muted); }
 .pt-modal-name-hint {
   margin: 2px 0 0;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--danger);
 }
 .pt-modal-name-hint[hidden] { display: none; }
 

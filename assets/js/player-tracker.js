@@ -13,7 +13,8 @@ const GUILD_KEY   = 'pt_guild_members'; // localStorage key
 const CACHE_KEY   = 'pt_players_cache'; // localStorage key for cached player data
 const DAILY_KEY   = 'pt_daily_v1';      // localStorage key for daily stat tracking
 const PROFILE_KEY = 'pt_profile_v1';   // localStorage key for visitor profile
-const GUILDS_KEY  = 'pt_guilds_v1';    // localStorage key for guild registry
+const GUILDS_KEY        = 'pt_guilds_v1';    // localStorage key for guild registry
+const DELETED_GUILDS_KEY = 'pt_deleted_guilds_v1'; // tombstone set — never re-sync these
 
 // ── DOM refs ───────────────────────────────────────────────
 const dot            = document.getElementById('pt-status-dot');
@@ -152,6 +153,15 @@ function loadGuilds() {
   try { return JSON.parse(localStorage.getItem(GUILDS_KEY) || '[]'); }
   catch { return []; }
 }
+function loadDeletedGuildIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(DELETED_GUILDS_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function markGuildDeleted(guildId) {
+  const ids = loadDeletedGuildIds();
+  ids.add(guildId);
+  try { localStorage.setItem(DELETED_GUILDS_KEY, JSON.stringify([...ids])); } catch {}
+}
 
 // Firebase uses objects keyed by ID; convert at the boundary
 function guildsToFbObj(guilds) {
@@ -170,12 +180,15 @@ async function fetchGuildsFromFirebase() {
     if (!res.ok) return;
     const obj = await res.json();
     const fbGuilds = fbObjToGuilds(obj);
-    // Merge: Firebase is authoritative; append any purely local guilds not yet pushed
+    const deletedIds = loadDeletedGuildIds();
+    // Merge: Firebase is authoritative; append local-only guilds that weren't intentionally deleted
     const localGuilds = loadGuilds();
     const fbIds = new Set(fbGuilds.map(g => g.id));
-    const localOnly = localGuilds.filter(g => !fbIds.has(g.id));
+    const localOnly = localGuilds.filter(g => !fbIds.has(g.id) && !deletedIds.has(g.id));
     localOnly.forEach(g => fbGuilds.push(g));
-    try { localStorage.setItem(GUILDS_KEY, JSON.stringify(fbGuilds)); } catch {}
+    // Also strip any deleted guilds that somehow came back from Firebase
+    const merged = fbGuilds.filter(g => !deletedIds.has(g.id));
+    try { localStorage.setItem(GUILDS_KEY, JSON.stringify(merged)); } catch {}
     // Push any local-only guilds up to Firebase so they become visible to others
     if (localOnly.length > 0) pushGuildsToFirebase(localOnly);
   } catch { /* offline — fall back to localStorage */ }
@@ -199,9 +212,12 @@ async function pushGuildsToFirebase(guilds) {
 }
 
 async function deleteGuild(guildId) {
+  // 1. Remove from localStorage
   const guilds = loadGuilds().filter(g => g.id !== guildId);
   try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
-  // Delete from Firebase
+  // 2. Mark as deleted so it's never re-synced from localStorage → Firebase
+  markGuildDeleted(guildId);
+  // 3. Delete from Firebase
   try {
     const res = await fetch(`${GUILDS_FB_URL.replace('.json', '')}/${encodeURIComponent(guildId)}.json`, { method: 'DELETE' });
     if (!res.ok) console.warn('[PlayerTracker] Guild delete failed:', res.status);
@@ -662,7 +678,10 @@ function renderGuildPanel() {
   // Join buttons (only shown when user has no current guild)
   panel.querySelectorAll('.pt-guild-join-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (!loadProfile()?.inGameName) return;
+      if (!loadProfile()?.inGameName) {
+        showProfileModal();
+        return;
+      }
       joinGuild(btn.dataset.gid);
       renderGuildPanel();
       renderProfileBar();
@@ -714,6 +733,9 @@ function showProfileModal() {
   modalSelectedGuild  = null;
   modalSelectedPlayer = null;
 
+  // Always unlock the name field when opening
+  nameInput.readOnly = false;
+  nameInput.classList.remove('pt-modal-input--locked');
   nameInput.value  = profile?.inGameName ?? '';
   nameHint.hidden  = true;
 
@@ -732,6 +754,8 @@ function showProfileModal() {
     const match = allPlayers.find(p => p.name.toLowerCase() === profile.inGameName.toLowerCase());
     if (match) {
       modalSelectedPlayer = match;
+      nameInput.readOnly  = true;
+      nameInput.classList.add('pt-modal-input--locked');
       if (guildSec) guildSec.hidden = false;
     } else {
       if (guildSec) guildSec.hidden = true;
@@ -779,13 +803,12 @@ function initProfileModal() {
     if (matches.length === 0) {
       nameDropdown.hidden = true;
       nameHint.hidden     = false;
-      // No DB data — hide guild section
       if (guildSec) guildSec.hidden = true;
       modalSelectedPlayer = null;
       return;
     }
 
-    nameHint.hidden     = false; // also show hint so they know they can still just type
+    nameHint.hidden     = true;
     nameDropdown.hidden = false;
     nameDropdown.innerHTML = matches.slice(0, 12).map(p =>
       `<div class="pt-dropdown-item" data-name="${escHtml(p.name)}">
@@ -800,6 +823,8 @@ function initProfileModal() {
         if (!selected) return;
         modalSelectedPlayer      = selected;
         nameInput.value          = selected.name;
+        nameInput.readOnly       = true;
+        nameInput.classList.add('pt-modal-input--locked');
         nameDropdown.hidden      = true;
         nameHint.hidden          = true;
         // Player found in DB — reveal guild section
@@ -860,9 +885,10 @@ function initProfileModal() {
   saveBtn.addEventListener('click', () => {
     const guildIdInput = document.getElementById('pt-profile-guild-id');
     const name = nameInput.value.trim();
-    if (!name) {
+    if (!name || !modalSelectedPlayer) {
       nameInput.focus();
       nameInput.classList.add('pt-modal-input--error');
+      nameHint.hidden = false;
       return;
     }
     nameInput.classList.remove('pt-modal-input--error');
