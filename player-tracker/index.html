@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <meta name="description" content="Live player stats from your Blue Protocol: Star Resonance game session">
-  <title>Player Tracker — Blue Protocol</title>
+  <title>Top 100 Players — Blue Protocol</title>
   <link rel="stylesheet" href="../assets/css/player-tracker.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
 
     <div class="pt-page-header">
       <a class="pt-home-link" href="../">← Home</a>
-      <h1 class="pt-page-title">🧑‍🎮 Player Tracker</h1>
-      <p class="pt-page-sub">Live character data from your current game session</p>
+      <h1 class="pt-page-title">🏆 Top 100 Players</h1>
+      <p class="pt-page-sub">Global ranking by Ability Score and Illusion Strength</p>
     </div>
 
     <!-- Status bar -->
@@ -56,29 +56,6 @@
       <button class="pt-refresh-btn" id="pt-refresh-btn" title="Refresh now">↺</button>
     </div>
 
-    <!-- Guild member editor — shown when View = Guild Members -->
-    <div class="pt-guild-panel" id="pt-guild-panel" hidden>
-      <div class="pt-guild-panel-header">
-        <span class="pt-guild-panel-title">⚔️ Guild Member List</span>
-        <span class="pt-guild-panel-hint">Only players whose names are in this list will be shown.</span>
-      </div>
-      <div class="pt-guild-input-row">
-        <input
-          type="text"
-          id="pt-guild-name-input"
-          class="pt-search pt-guild-name-input"
-          placeholder="Enter player name…"
-          aria-label="Add guild member by name"
-          autocomplete="off"
-        />
-        <button class="pt-guild-add-btn" id="pt-guild-add-btn">+ Add</button>
-      </div>
-      <div class="pt-guild-tags" id="pt-guild-tags"></div>
-      <p class="pt-guild-empty-hint" id="pt-guild-empty-hint" hidden>
-        No members added yet. Type a name above and click <strong>+ Add</strong>.
-      </p>
-    </div>
-
     <!-- Player table -->
     <div class="pt-table-wrapper" id="pt-table-wrapper">
       <table class="pt-table" id="pt-table" aria-label="Player list">
@@ -89,19 +66,20 @@
             <th class="pt-col-level">Level</th>
             <th class="pt-col-as">Ability Score / Illusion Str</th>
             <th class="pt-col-spec">Spec</th>
+            <th class="pt-col-action" id="pt-col-action-header"></th>
           </tr>
         </thead>
         <tbody id="pt-tbody">
           <tr class="pt-loading-row">
-            <td colspan="5">Loading…</td>
+            <td colspan="6">Loading…</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <p class="pt-footer-note">
+      Showing the top 100 players by Ability Score. Search by name to find any player regardless of rank.
       Data is refreshed every 15 seconds from ZDPS's entity cache.
-      Players are shown after they have been seen at least once by ZDPS in the current session.
     </p>
 
   </div>

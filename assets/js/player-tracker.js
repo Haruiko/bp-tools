@@ -22,11 +22,7 @@ const searchInput    = document.getElementById('pt-search');
 const sortSelect     = document.getElementById('pt-sort');
 const viewSelect     = document.getElementById('pt-view');
 const refreshBtn     = document.getElementById('pt-refresh-btn');
-const guildPanel     = document.getElementById('pt-guild-panel');
-const guildTags      = document.getElementById('pt-guild-tags');
-const guildNameInput = document.getElementById('pt-guild-name-input');
-const guildAddBtn    = document.getElementById('pt-guild-add-btn');
-const guildEmptyHint = document.getElementById('pt-guild-empty-hint');
+const actionHeader   = document.getElementById('pt-col-action-header');
 
 // ── State ──────────────────────────────────────────────────
 let allPlayers   = [];
@@ -84,44 +80,27 @@ function removeGuildMember(name) {
   render(allPlayers);
 }
 
-function renderGuildTags() {
-  const list = loadGuildMembers();
-  guildEmptyHint.hidden = list.length > 0;
-  guildTags.innerHTML = list.map(name => `
-    <span class="pt-guild-tag">
-      <span class="pt-guild-tag-name">${escHtml(name)}</span>
-      <button class="pt-guild-tag-remove" data-name="${escHtml(name)}" title="Remove">&#x2715;</button>
-    </span>
-  `).join('');
-}
+
 
 // ── Bootstrap ──────────────────────────────────────────────
 searchInput.addEventListener('input', () => render(allPlayers));
 sortSelect.addEventListener('change', () => render(allPlayers));
 viewSelect.addEventListener('change', () => {
-  const isGuild = viewSelect.value === 'guild';
-  guildPanel.hidden = !isGuild;
-  if (isGuild) renderGuildTags();
   render(allPlayers);
 });
 
-// Guild add via button or Enter key
-guildAddBtn.addEventListener('click', () => {
-  addGuildMember(guildNameInput.value);
-  guildNameInput.value = '';
-  guildNameInput.focus();
-});
-guildNameInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    addGuildMember(guildNameInput.value);
-    guildNameInput.value = '';
+// Table row button delegation: + to add, - to remove
+tbody.addEventListener('click', e => {
+  const addBtn = e.target.closest('.pt-add-guild-btn');
+  if (addBtn) {
+    addGuildMember(addBtn.dataset.name);
+    addBtn.textContent = '✓';
+    addBtn.disabled = true;
+    addBtn.classList.add('pt-add-guild-btn--added');
+    return;
   }
-});
-
-// Guild tag removal (event delegation)
-guildTags.addEventListener('click', e => {
-  const btn = e.target.closest('.pt-guild-tag-remove');
-  if (btn) removeGuildMember(btn.dataset.name);
+  const removeBtn = e.target.closest('.pt-remove-guild-btn');
+  if (removeBtn) removeGuildMember(removeBtn.dataset.name);
 });
 
 refreshBtn.addEventListener('click', () => {
@@ -197,29 +176,35 @@ function render(players) {
 
   let list = [...players];
 
-  // Guild filter first
+  // Guild filter
   if (guildSet) {
     list = list.filter(p => guildSet.has(p.name.toLowerCase()));
   }
 
-  // Then name search
-  if (query) {
-    list = list.filter(p => p.name.toLowerCase().includes(query));
-  }
-
+  // Sort before capping
   if (sort === 'level') {
     list.sort((a, b) => b.level - a.level || b.abilityScore - a.abilityScore);
   } else if (sort === 'name') {
     list.sort((a, b) => a.name.localeCompare(b.name));
   } else {
-    // abilityScore — already presorted by server, but re-sort client-side after filter
     list.sort((a, b) => b.abilityScore - a.abilityScore);
+  }
+
+  // Cap to top 100 in All Players view with no search query;
+  // when searching, show all matches regardless of rank
+  if (!isGuild && !query) {
+    list = list.slice(0, 100);
+  }
+
+  // Name search (across full sorted list when query present)
+  if (query) {
+    list = list.filter(p => p.name.toLowerCase().includes(query));
   }
 
   if (list.length === 0) {
     let msg;
     if (isGuild && loadGuildMembers().length === 0) {
-      msg = 'No guild members added yet — use the list above to add names.';
+      msg = 'No guild members added yet — switch to All Players and click + on a row to add members.';
     } else if (isGuild) {
       msg = 'None of your guild members have been seen in this session yet.';
     } else if (query) {
@@ -227,9 +212,11 @@ function render(players) {
     } else {
       msg = 'No players found in this session yet';
     }
-    tbody.innerHTML = `<tr class="pt-empty-row"><td colspan="5">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr class="pt-empty-row"><td colspan="6">${msg}</td></tr>`;
     return;
   }
+
+  const guildMembers = loadGuildMembers().map(n => n.toLowerCase());
 
   tbody.innerHTML = list.map((p, i) => {
     const rank      = i + 1;
@@ -240,6 +227,21 @@ function render(players) {
     const illusionHtml = p.illusionStrength > 0
       ? `<span class="pt-illusion">✶ ${p.illusionStrength.toLocaleString()}</span>`
       : '';
+    const alreadyInGuild = guildMembers.includes(p.name.toLowerCase());
+    const actionCell = isGuild
+      ? `<td class="pt-col-action">
+          <button class="pt-remove-guild-btn"
+                  data-name="${escHtml(p.name)}"
+                  title="Remove from guild">−</button>
+        </td>`
+      : `<td class="pt-col-action">
+          <button class="pt-add-guild-btn${alreadyInGuild ? ' pt-add-guild-btn--added' : ''}"
+                  data-name="${escHtml(p.name)}"
+                  title="Add to guild"
+                  ${alreadyInGuild ? 'disabled' : ''}>
+            ${alreadyInGuild ? '✓' : '+'}
+          </button>
+        </td>`;
 
     return `
       <tr>
@@ -253,9 +255,11 @@ function render(players) {
           <span class="pt-level">${p.level}</span>
         </td>
         <td class="pt-col-as">
-          <span class="pt-as">${p.abilityScore.toLocaleString()}</span>${illusionHtml}
+          <span class="pt-as-row">
+            <span class="pt-as">${p.abilityScore.toLocaleString()}</span>${illusionHtml}
+          </span>
         </td>
-        <td class="pt-col-spec">${specHtml}</td>
+        <td class="pt-col-spec">${specHtml}</td>${actionCell}
       </tr>`;
   }).join('');
 }
