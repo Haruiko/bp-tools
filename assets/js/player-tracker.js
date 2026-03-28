@@ -143,6 +143,9 @@ function loadProfile() {
 function saveProfile(p) {
   try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch {}
 }
+function isAdmin(profile) {
+  return profile?.inGameName?.toLowerCase() === 'aira';
+}
 
 // ── Guild registry ─────────────────────────────────────────
 function loadGuilds() {
@@ -158,7 +161,7 @@ function guildsToFbObj(guilds) {
 }
 function fbObjToGuilds(obj) {
   if (!obj || typeof obj !== 'object') return [];
-  return Object.values(obj);
+  return Object.values(obj).map(g => ({ ...g, members: Array.isArray(g.members) ? g.members : [] }));
 }
 
 async function fetchGuildsFromFirebase() {
@@ -193,6 +196,20 @@ async function pushGuildsToFirebase(guilds) {
   } catch (err) {
     console.warn('[PlayerTracker] Guild sync error:', err);
   }
+}
+
+async function deleteGuild(guildId) {
+  const guilds = loadGuilds().filter(g => g.id !== guildId);
+  try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
+  // Delete from Firebase
+  try {
+    const res = await fetch(`${GUILDS_FB_URL.replace('.json', '')}/${encodeURIComponent(guildId)}.json`, { method: 'DELETE' });
+    if (!res.ok) console.warn('[PlayerTracker] Guild delete failed:', res.status);
+  } catch (err) {
+    console.warn('[PlayerTracker] Guild delete error:', err);
+  }
+  renderGuildPanel();
+  render(allPlayers);
 }
 
 function saveGuilds(guilds) {
@@ -304,6 +321,31 @@ tbody.addEventListener('click', e => {
 refreshBtn.addEventListener('click', () => {
   refreshBtn.classList.add('spinning');
   setTimeout(() => refreshBtn.classList.remove('spinning'), 600);
+  connectRealtime();
+});
+
+document.getElementById('pt-clear-cache-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('pt-clear-cache-btn');
+  btn.disabled = true;
+  btn.textContent = 'Clearing…';
+  // Clear browser localStorage player cache
+  localStorage.removeItem(CACHE_KEY);
+  localStorage.removeItem(DAILY_KEY);
+  allPlayers = [];
+  try {
+    // Ask the local exe to wipe Firebase and repush fresh data
+    const res = await fetch('http://localhost:7777/reset', { signal: AbortSignal.timeout(10000) });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = `Done (✓ ${data.count} players)`;
+    } else {
+      btn.textContent = 'Cache cleared';
+    }
+  } catch {
+    // Exe not running — at least browser cache is cleared
+    btn.textContent = 'Local cache cleared';
+  }
+  setTimeout(() => { btn.textContent = 'Clear Cache'; btn.disabled = false; }, 3000);
   connectRealtime();
 });
 
@@ -454,8 +496,11 @@ function render(players) {
   tbody.innerHTML = list.map((p, i) => {
     const rank      = i + 1;
     const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
+    const specIcon = p.professionSpec
+      ? `<img class="pt-spec-icon" src="../assets/Image/${p.professionSpec.toLowerCase()}.png" alt="" aria-hidden="true">`
+      : '';
     const specHtml  = p.professionSpec
-      ? `<span class="pt-spec">${escHtml(p.professionSpec)}</span>`
+      ? `<span class="pt-spec">${specIcon}${escHtml(p.professionSpec)}</span>`
       : `<span class="pt-spec pt-spec-none">—</span>`;
     const illusionHtml = p.illusionStrength > 0
       ? `<span class="pt-illusion">✶ ${p.illusionStrength.toLocaleString()}</span>`
@@ -544,6 +589,7 @@ function renderGuildPanel() {
   const currentGuildId = profile?.guildId ?? null;
   const guilds         = loadGuilds();
   const currentGuild   = currentGuildId ? guilds.find(g => g.id === currentGuildId) : null;
+  const admin          = isAdmin(profile);
 
   panel.innerHTML = `
     <div class="pt-guild-panel-inner" style="grid-template-columns:1fr">
@@ -553,7 +599,7 @@ function renderGuildPanel() {
           <div class="pt-guild-list-item pt-guild-list-item--active" style="margin-bottom:16px">
             <div class="pt-guild-list-info">
               <span class="pt-guild-list-name">${escHtml(currentGuild.name)}</span>
-              <span class="pt-guild-list-meta">ID: ${escHtml(currentGuild.id)} · ${currentGuild.members.length} member${currentGuild.members.length !== 1 ? 's' : ''}</span>
+              <span class="pt-guild-list-meta">ID: ${escHtml(currentGuild.id)} · ${(currentGuild.members || []).length} member${(currentGuild.members || []).length !== 1 ? 's' : ''}</span>
             </div>
             <button class="pt-guild-leave-btn" data-gid="${escHtml(currentGuild.id)}">Leave</button>
           </div>
@@ -574,12 +620,13 @@ function renderGuildPanel() {
                   <div class="pt-guild-list-item" style="display:none" data-guild-item>
                     <div class="pt-guild-list-info">
                       <span class="pt-guild-list-name">${escHtml(g.name)}</span>
-                      <span class="pt-guild-list-meta">ID: ${escHtml(g.id)} · ${g.members.length} member${g.members.length !== 1 ? 's' : ''}</span>
+                      <span class="pt-guild-list-meta">ID: ${escHtml(g.id)} · ${(g.members || []).length} member${(g.members || []).length !== 1 ? 's' : ''}</span>
                     </div>
                     ${currentGuild
                       ? `<span class="pt-guild-join-locked" title="Leave your current guild first">Leave first</span>`
                       : `<button class="pt-guild-join-btn" data-gid="${escHtml(g.id)}">Join</button>`
                     }
+                    ${admin ? `<button class="pt-guild-delete-btn" data-gid="${escHtml(g.id)}" title="Delete guild">Delete</button>` : ''}
                   </div>`).join('')}
         </div>
       </div>
@@ -620,6 +667,15 @@ function renderGuildPanel() {
       renderGuildPanel();
       renderProfileBar();
       render(allPlayers);
+    });
+  });
+
+  // Delete buttons (admin only)
+  panel.querySelectorAll('.pt-guild-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const guildName = btn.closest('[data-guild-item]')?.querySelector('.pt-guild-list-name')?.textContent ?? 'this guild';
+      if (!confirm(`Delete "${guildName}"? This cannot be undone.`)) return;
+      deleteGuild(btn.dataset.gid);
     });
   });
 }

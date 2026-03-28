@@ -219,6 +219,21 @@ body {
 .pt-refresh-btn.spinning { animation: spin 0.6s linear; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.pt-clear-cache-btn {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+.pt-clear-cache-btn:hover { background: rgba(224,93,93,0.1); border-color: var(--danger); color: var(--danger); }
+.pt-clear-cache-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* ── Guild panel ── */
 /* Add/remove guild buttons in table rows */
 .pt-col-action { width: 120px; text-align: center; padding: 0 8px !important; }
@@ -410,8 +425,16 @@ body {
 .pt-class-unknown        { background: rgba(200,200,200,0.10); color: var(--text-muted); }
 
 /* Spec text */
-.pt-spec { color: var(--text-muted); font-size: 0.87rem; }
+.pt-spec { color: var(--text-muted); font-size: 0.87rem; display: inline-flex; align-items: center; gap: 5px; }
 .pt-spec-none { font-style: italic; color: rgba(163,177,198,0.45); }
+
+.pt-spec-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
 
 /* Loading / empty / error rows */
 .pt-loading-row td,
@@ -697,6 +720,23 @@ body {
   transition: background 0.15s;
 }
 .pt-guild-leave-btn:hover { background: rgba(224,93,93,0.15); }
+
+.pt-guild-delete-btn {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.8;
+  transition: background 0.15s, opacity 0.15s;
+}
+.pt-guild-delete-btn:hover { background: rgba(224,93,93,0.15); opacity: 1; }
 
 .pt-guild-join-locked {
   font-size: 0.75rem;
