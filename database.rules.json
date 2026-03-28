@@ -11,6 +11,14 @@
     "deleted_guilds": {
       ".read": true,
       ".write": true
+    },
+    "chat": {
+      ".read": true,
+      ".write": false
+    },
+    "union_members": {
+      ".read": true,
+      ".write": false
     }
   }
 }

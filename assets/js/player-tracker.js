@@ -8,6 +8,7 @@ const FIREBASE_BASE  = 'https://bp-player-tracker-db-default-rtdb.asia-southeast
 const FIREBASE_URL          = FIREBASE_BASE + '/players.json';
 const GUILDS_FB_URL         = FIREBASE_BASE + '/guilds.json';
 const DELETED_GUILDS_FB_URL = FIREBASE_BASE + '/deleted_guilds.json';
+const UNION_MEMBERS_FB_URL  = FIREBASE_BASE + '/union_members.json';
 const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
 
 const PROFILE_KEY = 'pt_profile_v1'; // localStorage key for visitor profile (must persist between visits)
@@ -38,6 +39,10 @@ let reconnectTimer      = null;
 let modalSelectedGuild  = null; // guild selected inside the profile modal
 let modalSelectedPlayer = null; // player record selected from DB search
 let _dailyStats     = null;   // session-only daily stat accumulator (resets on page load)
+let _renderList     = [];     // full sorted/filtered list for infinite scroll
+const PAGE_SIZE     = 50;     // rows loaded per scroll batch
+let _displayLimit   = PAGE_SIZE;
+
 
 // ── Daily stat tracking (session-only, resets on page load) ──────────────
 function getTodayStr() {
@@ -279,6 +284,33 @@ function renderGuildTags() {
   if (viewSelect.value === 'guild') renderGuildPanel();
 }
 
+// ── Get Guild Members from Firebase ───────────────────────
+async function getGuildMembersFromFirebase() {
+  const btn = document.getElementById('pt-get-members-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Fetching…'; }
+  try {
+    const res = await fetch(UNION_MEMBERS_FB_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data) { alert('No union members found in Firebase yet. Make sure BP-Player-Tracker is running.'); return; }
+
+    let added = 0;
+    for (const key of Object.keys(data)) {
+      const member = data[key];
+      const name = member?.name ?? member?.Name;
+      if (!name) continue;
+      const before = loadGuildMembers().length;
+      addGuildMember(name);
+      if (loadGuildMembers().length > before) added++;
+    }
+    alert(`Done! Added ${added} new member(s) to your guild.`);
+  } catch (err) {
+    alert(`Failed to fetch union members: ${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚔️ Get Guild Members'; }
+  }
+}
+
 
 
 // ── Bootstrap ──────────────────────────────────────────────
@@ -297,6 +329,12 @@ viewSelect.addEventListener('change', () => {
 tbody.addEventListener('click', e => {
   const addBtn = e.target.closest('.pt-add-guild-btn');
   if (addBtn) {
+    const profile = loadProfile();
+    // No profile or no guild — open profile setup modal instead
+    if (!profile?.inGameName || !profile?.guildId) {
+      showProfileModal();
+      return;
+    }
     addGuildMember(addBtn.dataset.name);
     addBtn.textContent = '✓';
     addBtn.disabled = true;
@@ -454,7 +492,7 @@ function render(players) {
     list = list.filter(p => guildSet.has(p.name.toLowerCase()));
   }
 
-  // Sort before capping
+  // Sort
   if (sort === 'level') {
     list.sort((a, b) => b.level - a.level || b.abilityScore - a.abilityScore);
   } else if (sort === 'name') {
@@ -463,16 +501,22 @@ function render(players) {
     list.sort((a, b) => b.abilityScore - a.abilityScore);
   }
 
-  // Cap to top 100 in All Players view with no search query;
-  // when searching, show all matches regardless of rank
-  if (!isGuild && !query) {
-    list = list.slice(0, 100);
-  }
-
-  // Name search (across full sorted list when query present)
+  // Name search
   if (query) {
     list = list.filter(p => p.name.toLowerCase().includes(query));
   }
+
+  // Store full list for infinite scroll and reset display window
+  _renderList   = list;
+  _displayLimit = PAGE_SIZE;
+  renderRows();
+}
+
+function renderRows() {
+  const list      = _renderList;
+  const isGuild   = viewSelect.value === 'guild';
+  const query     = searchInput.value.trim().toLowerCase();
+  const visible   = list.slice(0, _displayLimit);
 
   if (list.length === 0) {
     let msg;
@@ -494,15 +538,15 @@ function render(players) {
   const guildMembers = loadGuildMembers().map(n => n.toLowerCase());
 
   // Build a name → guild name lookup from all known guilds
-  const allGuilds = loadGuilds();
-  const playerGuildMap = {}; // lowercase name → guild name
-  allGuilds.forEach(g => {
+  const allGuildsLocal = loadGuilds();
+  const playerGuildMap = {};
+  allGuildsLocal.forEach(g => {
     (g.members || []).forEach(m => {
       playerGuildMap[m.toLowerCase()] = g.name;
     });
   });
 
-  tbody.innerHTML = list.map((p, i) => {
+  tbody.innerHTML = visible.map((p, i) => {
     const rank      = i + 1;
     const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
     const specIcon = p.professionSpec
@@ -527,8 +571,7 @@ function render(players) {
             ? `<span class="pt-guild-badge" title="Guild: ${escHtml(playerGuildName)}">${escHtml(playerGuildName)}</span>`
             : `<button class="pt-add-guild-btn${!hasGuild ? ' pt-add-guild-btn--no-guild' : ''}"
                   data-name="${escHtml(p.name)}"
-                  title="${!hasGuild ? 'Join a guild first' : 'Add to my guild'}"
-                  ${!hasGuild ? 'disabled' : ''}>
+                  title="${!hasGuild ? 'Set up your profile & join a guild' : 'Add to my guild'}">
               +
             </button>`
           }
@@ -540,7 +583,7 @@ function render(players) {
           <span class="pt-rank ${rankClass}">${rank}</span>
         </td>
         <td class="pt-col-name">
-          <span class="pt-name">${escHtml(p.name)}</span>
+          <span class="pt-name" ${p.uid ? `title="UID: ${p.uid}"` : ''}>${escHtml(p.name)}</span>
         </td>
         <td class="pt-col-level">
           <span class="pt-level">${p.level}${p.seasonLevel > 0 ? `<span class="pt-season-level">(+${p.seasonLevel})</span>` : ''}</span>
@@ -553,7 +596,24 @@ function render(players) {
         <td class="pt-col-spec">${specHtml}</td>${actionCell}
       </tr>`;
   }).join('');
+
+  // Append a sentinel row for infinite scroll if more rows remain
+  if (_displayLimit < list.length) {
+    const sentinel = document.createElement('tr');
+    sentinel.id = 'pt-scroll-sentinel';
+    sentinel.innerHTML = `<td colspan="6" style="text-align:center;padding:18px;color:var(--text-muted);font-size:0.85rem;">Loading more…</td>`;
+    tbody.appendChild(sentinel);
+    _scrollObserver?.observe(sentinel);
+  }
 }
+
+// ── Infinite scroll observer ───────────────────────────────
+const _scrollObserver = new IntersectionObserver((entries) => {
+  if (entries[0].isIntersecting) {
+    _displayLimit += PAGE_SIZE;
+    renderRows();
+  }
+}, { rootMargin: '200px' });
 
 // ── Helpers ────────────────────────────────────────────────
 function updateStats(data) {
@@ -707,9 +767,21 @@ function renderProfileBar() {
         <span class="pt-profile-name">${escHtml(profile.inGameName)}</span>
         ${guild ? `<span class="pt-profile-guild-badge">⚔️ ${escHtml(guild.name)}</span>` : ''}
       </span>
-      <button class="pt-profile-edit-btn" id="pt-profile-btn">Edit</button>`;
+      <span class="pt-profile-actions">
+        ${guild ? `<button class="pt-get-members-btn" id="pt-get-members-btn">⚔️ Get Guild Members</button>` : ''}
+        <button class="pt-profile-edit-btn" id="pt-profile-btn">Edit</button>
+        <button class="pt-profile-remove-btn" id="pt-profile-remove-btn">Remove</button>
+      </span>`;
   }
   document.getElementById('pt-profile-btn')?.addEventListener('click', () => showProfileModal());
+  document.getElementById('pt-get-members-btn')?.addEventListener('click', getGuildMembersFromFirebase);
+  document.getElementById('pt-profile-remove-btn')?.addEventListener('click', () => {
+    if (!confirm('Remove your profile? This will not remove you from your guild.')) return;
+    saveProfile(null);
+    renderProfileBar();
+    renderGuildPanel();
+    render(allPlayers);
+  });
 }
 
 // ── Profile modal ──────────────────────────────────────────
