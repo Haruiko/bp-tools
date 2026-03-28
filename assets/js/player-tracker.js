@@ -10,12 +10,7 @@ const GUILDS_FB_URL         = FIREBASE_BASE + '/guilds.json';
 const DELETED_GUILDS_FB_URL = FIREBASE_BASE + '/deleted_guilds.json';
 const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
 
-const GUILD_KEY   = 'pt_guild_members'; // localStorage key
-const CACHE_KEY   = 'pt_players_cache'; // localStorage key for cached player data
-const DAILY_KEY   = 'pt_daily_v1';      // localStorage key for daily stat tracking
-const PROFILE_KEY = 'pt_profile_v1';   // localStorage key for visitor profile
-const GUILDS_KEY        = 'pt_guilds_v1';    // localStorage key for guild registry
-const DELETED_GUILDS_KEY = 'pt_deleted_guilds_v1'; // tombstone set — never re-sync these
+const PROFILE_KEY = 'pt_profile_v1'; // localStorage key for visitor profile (must persist between visits)
 
 // ── DOM refs ───────────────────────────────────────────────
 const dot            = document.getElementById('pt-status-dot');
@@ -36,44 +31,20 @@ const actionHeader   = document.getElementById('pt-col-action-header');
 
 // ── State ──────────────────────────────────────────────────
 let allPlayers      = [];
+let allGuilds       = [];   // guild registry — loaded from Firebase, never cached locally
 let isOnline        = false;
 let eventSource     = null;   // Firebase SSE connection
 let reconnectTimer      = null;
 let modalSelectedGuild  = null; // guild selected inside the profile modal
 let modalSelectedPlayer = null; // player record selected from DB search
+let _dailyStats     = null;   // session-only daily stat accumulator (resets on page load)
 
-// ── Cache helpers ──────────────────────────────────────────
-function savePlayersCache(players) {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ players, savedAt: new Date().toISOString() }));
-  } catch { /* storage full or private mode */ }
-}
-
-function loadPlayersCache() {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-
-// ── Daily stat tracking ────────────────────────────────────
-// Persists across page refreshes; resets at midnight.
+// ── Daily stat tracking (session-only, resets on page load) ──────────────
 function getTodayStr() {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD" in UTC
+  return new Date().toISOString().slice(0, 10);
 }
-
-function loadDailyStats() {
-  try {
-    const raw = localStorage.getItem(DAILY_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw);
-    return s.date === getTodayStr() ? s : null; // discard if new day
-  } catch { return null; }
-}
-
-function saveDailyStats(s) {
-  try { localStorage.setItem(DAILY_KEY, JSON.stringify(s)); } catch {}
-}
+function loadDailyStats()  { return _dailyStats; }
+function saveDailyStats(s) { _dailyStats = s; }
 
 // Called after every Firebase push. Diffs the new player list against the
 // daily baseline and accumulates scanned / new / updated counters.
@@ -149,20 +120,8 @@ function isAdmin(profile) {
   return profile?.inGameName?.toLowerCase() === 'aira';
 }
 
-// ── Guild registry ─────────────────────────────────────────
-function loadGuilds() {
-  try { return JSON.parse(localStorage.getItem(GUILDS_KEY) || '[]'); }
-  catch { return []; }
-}
-function loadDeletedGuildIds() {
-  try { return new Set(JSON.parse(localStorage.getItem(DELETED_GUILDS_KEY) || '[]')); }
-  catch { return new Set(); }
-}
-function markGuildDeleted(guildId) {
-  const ids = loadDeletedGuildIds();
-  ids.add(guildId);
-  try { localStorage.setItem(DELETED_GUILDS_KEY, JSON.stringify([...ids])); } catch {}
-}
+// ── Guild registry (in-memory, sourced from Firebase) ─────────────────
+function loadGuilds() { return allGuilds; }
 
 async function fetchDeletedGuildIdsFromFirebase() {
   try {
@@ -193,26 +152,9 @@ async function fetchGuildsFromFirebase() {
     ]);
     if (!guildsRes.ok) return;
     const obj = await guildsRes.json();
-    const fbGuilds = fbObjToGuilds(obj);
-    // Combine Firebase tombstone + local tombstone for full picture
-    const localDeletedIds = loadDeletedGuildIds();
-    const deletedIds = new Set([...localDeletedIds, ...fbDeletedIds]);
-    // Persist any newly-discovered Firebase tombstones to localStorage
-    if (fbDeletedIds.size > 0) {
-      fbDeletedIds.forEach(id => localDeletedIds.add(id));
-      try { localStorage.setItem(DELETED_GUILDS_KEY, JSON.stringify([...localDeletedIds])); } catch {}
-    }
-    // Merge: Firebase is authoritative; append local-only guilds that weren't intentionally deleted
-    const localGuilds = loadGuilds();
-    const fbIds = new Set(fbGuilds.map(g => g.id));
-    const localOnly = localGuilds.filter(g => !fbIds.has(g.id) && !deletedIds.has(g.id));
-    localOnly.forEach(g => fbGuilds.push(g));
-    // Strip any deleted guilds that somehow appear in Firebase (belt-and-suspenders)
-    const merged = fbGuilds.filter(g => !deletedIds.has(g.id));
-    try { localStorage.setItem(GUILDS_KEY, JSON.stringify(merged)); } catch {}
-    // Push any local-only guilds up to Firebase so they become visible to others
-    if (localOnly.length > 0) pushGuildsToFirebase(localOnly);
-  } catch { /* offline — fall back to localStorage */ }
+    // Filter out any guilds that have been tombstoned in /deleted_guilds
+    allGuilds = fbObjToGuilds(obj).filter(g => !fbDeletedIds.has(g.id));
+  } catch { /* network unavailable — allGuilds stays as-is */ }
 }
 
 async function pushGuildsToFirebase(guilds) {
@@ -233,12 +175,9 @@ async function pushGuildsToFirebase(guilds) {
 }
 
 async function deleteGuild(guildId) {
-  // 1. Remove from localStorage
-  const guilds = loadGuilds().filter(g => g.id !== guildId);
-  try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
-  // 2. Mark as deleted locally so it's never re-synced from localStorage → Firebase
-  markGuildDeleted(guildId);
-  // 3. Persist deletion in Firebase so all other browsers inherit the tombstone
+  // 1. Remove from in-memory store
+  allGuilds = allGuilds.filter(g => g.id !== guildId);
+  // 2. Persist deletion in Firebase so all other browsers inherit the tombstone
   await Promise.allSettled([
     // Record in /deleted_guilds so any client can know this was intentionally removed
     fetch(DELETED_GUILDS_FB_URL, {
@@ -258,11 +197,16 @@ async function deleteGuild(guildId) {
 }
 
 function saveGuilds(guilds) {
-  try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
+  allGuilds = guilds; // update in-memory store
   pushGuildsToFirebase(guilds); // sync to Firebase in the background
 }
 function getGuildById(id) {
-  return loadGuilds().find(g => g.id === id) ?? null;
+  return allGuilds.find(g => g.id === id) ?? null;
+}
+// Find the guild (if any) that already lists this player as a member
+function findGuildByMember(playerName) {
+  const lower = playerName.toLowerCase();
+  return allGuilds.find(g => (g.members || []).some(m => m.toLowerCase() === lower)) ?? null;
 }
 function createGuild(name, id) {
   const guilds = loadGuilds();
@@ -373,9 +317,6 @@ document.getElementById('pt-clear-cache-btn')?.addEventListener('click', async (
   const btn = document.getElementById('pt-clear-cache-btn');
   btn.disabled = true;
   btn.textContent = 'Clearing…';
-  // Clear browser localStorage player cache
-  localStorage.removeItem(CACHE_KEY);
-  localStorage.removeItem(DAILY_KEY);
   allPlayers = [];
   try {
     // Ask the local exe to wipe Firebase and repush fresh data
@@ -430,18 +371,8 @@ function connectRealtime() {
     eventSource.close();
     eventSource = null;
     isOnline = false;
-
-    const cached = loadPlayersCache();
-    if (cached && allPlayers.length === 0) {
-      allPlayers = cached.players;
-      render(allPlayers);
-      const savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString() : '?';
-      setStatus('offline', `Connection lost — showing cached data from ${savedAt}`);
-    } else {
-      setStatus('offline', 'Connection lost — reconnecting…');
-    }
+    setStatus('offline', 'Connection lost — reconnecting…');
     showNotice(true);
-
     reconnectTimer = setTimeout(connectRealtime, RETRY_MS);
   };
 }
@@ -458,18 +389,51 @@ async function fetchOnce() {
 
 // Shared handler for both SSE put payloads and REST responses
 function handleData(data) {
-  if (data.error) {
-    setStatus('offline', `Server error: ${data.error}`);
-    showNotice(true);
+  if (!data || data.error) {
+    if (data?.error) {
+      setStatus('offline', `Server error: ${data.error}`);
+      showNotice(true);
+    }
     return;
   }
 
-  allPlayers = data.players ?? [];
+  // ── Detect format ──────────────────────────────────────────────────────────
+  // New format: flat object keyed by player name → { "PlayerName": { name, level, lastSeen, ... } }
+  // Old format: { updatedAt, count, players: [...] }
+  // Mixed:      old PUT data + new PATCH entries coexist (transition period)
+
+  // Collect name-keyed player entries (new format)
+  const newEntries = Object.values(data).filter(
+    v => v && typeof v === 'object' && typeof v.name === 'string' && typeof v.level === 'number' && v.level > 0
+  );
+
+  let players, updatedAt;
+
+  if (newEntries.length > 0) {
+    // New (or mixed) format — use keyed entries as primary source, supplement with
+    // any old-format players not yet migrated (so top players never vanish during transition)
+    const newNames = new Set(newEntries.map(p => p.name.toLowerCase()));
+    const oldArray = Array.isArray(data.players) ? data.players : [];
+    const oldOnly  = oldArray.filter(p => !newNames.has((p.name ?? '').toLowerCase()));
+    players   = [...newEntries, ...oldOnly];
+    updatedAt = newEntries.reduce((latest, p) => {
+      if (!p.lastSeen) return latest;
+      return !latest || p.lastSeen > latest ? p.lastSeen : latest;
+    }, null) ?? data.updatedAt ?? null;
+  } else if (Array.isArray(data.players)) {
+    // Pure old format
+    players   = data.players;
+    updatedAt = data.updatedAt;
+  } else {
+    players   = [];
+    updatedAt = null;
+  }
+
+  allPlayers = players;
   isOnline   = true;
-  savePlayersCache(allPlayers);
 
   updateStats(data);
-  setStatus('online', 'Live — last updated ' + timeAgo(data.updatedAt), null, data.updatedAt);
+  setStatus('online', 'Live — last updated ' + timeAgo(updatedAt), null, updatedAt);
   showNotice(false);
   render(allPlayers);
 }
@@ -768,24 +732,30 @@ function showProfileModal() {
   nameInput.value  = profile?.inGameName ?? '';
   nameHint.hidden  = true;
 
-  // Pre-fill guild if profile already has one
-  if (profile?.guildId && guildInput) {
-    const g = getGuildById(profile.guildId);
-    if (g) { guildInput.value = g.name; modalSelectedGuild = g; }
-    else guildInput.value = '';
-  } else if (guildInput) {
-    guildInput.value = '';
-  }
+  if (guildInput) guildInput.value = '';
   if (guildIdRow) guildIdRow.hidden = true;
 
-  // If the saved name exists in DB, show guild section immediately
+  // If the saved name exists in DB, check guild membership
   if (profile?.inGameName) {
     const match = allPlayers.find(p => p.name.toLowerCase() === profile.inGameName.toLowerCase());
     if (match) {
       modalSelectedPlayer = match;
       nameInput.readOnly  = true;
       nameInput.classList.add('pt-modal-input--locked');
-      if (guildSec) guildSec.hidden = false;
+      // Check if this player is already in a guild
+      const existingGuild = findGuildByMember(match.name);
+      if (existingGuild) {
+        modalSelectedGuild = existingGuild;
+        if (guildInput) guildInput.value = existingGuild.name;
+        if (guildSec) guildSec.hidden = true;
+      } else if (profile?.guildId) {
+        // Profile has a guildId but player not in members list — still show pre-filled
+        const g = getGuildById(profile.guildId);
+        if (g) { if (guildInput) guildInput.value = g.name; modalSelectedGuild = g; }
+        if (guildSec) guildSec.hidden = false;
+      } else {
+        if (guildSec) guildSec.hidden = false;
+      }
     } else {
       if (guildSec) guildSec.hidden = true;
     }
@@ -856,8 +826,17 @@ function initProfileModal() {
         nameInput.classList.add('pt-modal-input--locked');
         nameDropdown.hidden      = true;
         nameHint.hidden          = true;
-        // Player found in DB — reveal guild section
-        if (guildSec) guildSec.hidden = false;
+        // If this player is already in a guild, auto-select it and hide the guild section
+        const existingGuild = findGuildByMember(selected.name);
+        if (existingGuild) {
+          modalSelectedGuild = existingGuild;
+          if (guildInput) guildInput.value = existingGuild.name;
+          if (guildSec) guildSec.hidden = true;
+        } else {
+          modalSelectedGuild = null;
+          if (guildInput) guildInput.value = '';
+          if (guildSec) guildSec.hidden = false;
+        }
       });
     });
   });
@@ -937,7 +916,14 @@ function initProfileModal() {
     }
 
     saveProfile({ inGameName: name, guildId });
-    if (guildId) joinGuild(guildId);
+    if (guildId) {
+      // Only call joinGuild if the player isn't already a member of that guild
+      const targetGuild = loadGuilds().find(g => g.id === guildId);
+      const alreadyMember = targetGuild?.members?.some(
+        m => m.toLowerCase() === name.toLowerCase()
+      ) ?? false;
+      if (!alreadyMember) joinGuild(guildId);
+    }
     hideProfileModal();
     renderProfileBar();
     if (viewSelect.value === 'guild') renderGuildPanel();
