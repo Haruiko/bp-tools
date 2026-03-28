@@ -5,8 +5,9 @@
    ───────────────────────────────────────────── */
 
 const FIREBASE_BASE  = 'https://bp-player-tracker-db-default-rtdb.asia-southeast1.firebasedatabase.app';
-const FIREBASE_URL   = FIREBASE_BASE + '/players.json';
-const GUILDS_FB_URL  = FIREBASE_BASE + '/guilds.json';
+const FIREBASE_URL          = FIREBASE_BASE + '/players.json';
+const GUILDS_FB_URL         = FIREBASE_BASE + '/guilds.json';
+const DELETED_GUILDS_FB_URL = FIREBASE_BASE + '/deleted_guilds.json';
 const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
 
 const GUILD_KEY   = 'pt_guild_members'; // localStorage key
@@ -163,6 +164,16 @@ function markGuildDeleted(guildId) {
   try { localStorage.setItem(DELETED_GUILDS_KEY, JSON.stringify([...ids])); } catch {}
 }
 
+async function fetchDeletedGuildIdsFromFirebase() {
+  try {
+    const res = await fetch(DELETED_GUILDS_FB_URL);
+    if (!res.ok) return new Set();
+    const obj = await res.json();
+    if (!obj || typeof obj !== 'object') return new Set();
+    return new Set(Object.keys(obj).filter(k => obj[k]));
+  } catch { return new Set(); }
+}
+
 // Firebase uses objects keyed by ID; convert at the boundary
 function guildsToFbObj(guilds) {
   const obj = {};
@@ -176,17 +187,27 @@ function fbObjToGuilds(obj) {
 
 async function fetchGuildsFromFirebase() {
   try {
-    const res = await fetch(GUILDS_FB_URL);
-    if (!res.ok) return;
-    const obj = await res.json();
+    const [guildsRes, fbDeletedIds] = await Promise.all([
+      fetch(GUILDS_FB_URL),
+      fetchDeletedGuildIdsFromFirebase(),
+    ]);
+    if (!guildsRes.ok) return;
+    const obj = await guildsRes.json();
     const fbGuilds = fbObjToGuilds(obj);
-    const deletedIds = loadDeletedGuildIds();
+    // Combine Firebase tombstone + local tombstone for full picture
+    const localDeletedIds = loadDeletedGuildIds();
+    const deletedIds = new Set([...localDeletedIds, ...fbDeletedIds]);
+    // Persist any newly-discovered Firebase tombstones to localStorage
+    if (fbDeletedIds.size > 0) {
+      fbDeletedIds.forEach(id => localDeletedIds.add(id));
+      try { localStorage.setItem(DELETED_GUILDS_KEY, JSON.stringify([...localDeletedIds])); } catch {}
+    }
     // Merge: Firebase is authoritative; append local-only guilds that weren't intentionally deleted
     const localGuilds = loadGuilds();
     const fbIds = new Set(fbGuilds.map(g => g.id));
     const localOnly = localGuilds.filter(g => !fbIds.has(g.id) && !deletedIds.has(g.id));
     localOnly.forEach(g => fbGuilds.push(g));
-    // Also strip any deleted guilds that somehow came back from Firebase
+    // Strip any deleted guilds that somehow appear in Firebase (belt-and-suspenders)
     const merged = fbGuilds.filter(g => !deletedIds.has(g.id));
     try { localStorage.setItem(GUILDS_KEY, JSON.stringify(merged)); } catch {}
     // Push any local-only guilds up to Firebase so they become visible to others
@@ -215,15 +236,23 @@ async function deleteGuild(guildId) {
   // 1. Remove from localStorage
   const guilds = loadGuilds().filter(g => g.id !== guildId);
   try { localStorage.setItem(GUILDS_KEY, JSON.stringify(guilds)); } catch {}
-  // 2. Mark as deleted so it's never re-synced from localStorage → Firebase
+  // 2. Mark as deleted locally so it's never re-synced from localStorage → Firebase
   markGuildDeleted(guildId);
-  // 3. Delete from Firebase
-  try {
-    const res = await fetch(`${GUILDS_FB_URL.replace('.json', '')}/${encodeURIComponent(guildId)}.json`, { method: 'DELETE' });
-    if (!res.ok) console.warn('[PlayerTracker] Guild delete failed:', res.status);
-  } catch (err) {
-    console.warn('[PlayerTracker] Guild delete error:', err);
-  }
+  // 3. Persist deletion in Firebase so all other browsers inherit the tombstone
+  await Promise.allSettled([
+    // Record in /deleted_guilds so any client can know this was intentionally removed
+    fetch(DELETED_GUILDS_FB_URL, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [guildId]: true }),
+    }),
+    // Null out the guild node in /guilds (Firebase treats null value in PATCH as deletion)
+    fetch(GUILDS_FB_URL, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [guildId]: null }),
+    }),
+  ]);
   renderGuildPanel();
   render(allPlayers);
 }
