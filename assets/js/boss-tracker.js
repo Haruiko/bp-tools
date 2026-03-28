@@ -126,7 +126,7 @@
   const DELETE_AFTER_MS = 10_000; // delete the Discord message after 10 seconds
 
   async function sendDiscordMessage(bossName, channel, hp, { promptIfMissing = true, autoDelete = true } = {}) {
-    let webhookUrl = getWebhookUrl();
+    let webhookUrl = getWebhookUrl().replace(/\/+$/, ''); // strip any trailing slashes
     if (!webhookUrl) {
       if (!promptIfMissing) return; // auto-alerts skip silently when no webhook set
       const url = prompt('No Discord webhook set.\nPaste your Webhook URL to continue:');
@@ -148,18 +148,22 @@
         return;
       }
       const msg = await res.json();
+      console.log(`[BossTracker] Sent msg id=${msg.id} | ${bossName} ch${channel} hp=${hp} autoDelete=${autoDelete}`);
       if (autoDelete) {
         // Schedule deletion after DELETE_AFTER_MS milliseconds
         setTimeout(async () => {
+          console.log(`[BossTracker] Deleting msg id=${msg.id}`);
           try {
-            await fetch(`${webhookUrl}/messages/${msg.id}`, { method: 'DELETE' });
-          } catch (_) {
-            // Silently ignore deletion errors
+            const dr = await fetch(`${webhookUrl}/messages/${msg.id}`, { method: 'DELETE' });
+            console.log(`[BossTracker] Delete result: ${dr.status}`);
+          } catch (err) {
+            console.error('[BossTracker] Delete fetch error:', err);
           }
         }, DELETE_AFTER_MS);
       }
       return msg.id;
-    } catch (_) {
+    } catch (err) {
+      console.error('[BossTracker] Send error:', err);
       alert('❌ Network error — could not reach Discord.');
     }
   }
@@ -197,15 +201,25 @@
         }
 
         if (justKilled) {
-          const wh = getWebhookUrl();
+          const wh = getWebhookUrl().replace(/\/+$/, '');
           const lowMsgId = pendingAlertMsgIds[key];
           delete pendingAlertMsgIds[key];
           const killedMsgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
-          // After 10 s delete the killed message and the paired 30% message simultaneously
+          console.log(`[BossTracker] justKilled — killedMsgId=${killedMsgId} lowMsgId=${lowMsgId} wh=${wh}`);
+          // After 10 s delete the killed message and the paired low-HP message simultaneously
           setTimeout(async () => {
+            console.log(`[BossTracker] Delete timer fired for ${boss.name} ch${r.channel_number}`);
             const deletions = [];
-            if (killedMsgId) deletions.push(fetch(`${wh}/messages/${killedMsgId}`, { method: 'DELETE' }).catch(() => {}));
-            if (lowMsgId)    deletions.push(fetch(`${wh}/messages/${lowMsgId}`,    { method: 'DELETE' }).catch(() => {}));
+            if (killedMsgId) deletions.push(
+              fetch(`${wh}/messages/${killedMsgId}`, { method: 'DELETE' })
+                .then(dr => console.log(`[BossTracker] Killed msg delete: ${dr.status}`))
+                .catch(err => console.error('[BossTracker] Killed msg delete error:', err))
+            );
+            if (lowMsgId) deletions.push(
+              fetch(`${wh}/messages/${lowMsgId}`, { method: 'DELETE' })
+                .then(dr => console.log(`[BossTracker] Low-HP msg delete: ${dr.status}`))
+                .catch(err => console.error('[BossTracker] Low-HP msg delete error:', err))
+            );
             await Promise.all(deletions);
           }, DELETE_AFTER_MS);
         }
