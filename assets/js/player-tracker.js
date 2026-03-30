@@ -10,6 +10,7 @@ const GUILDS_FB_URL         = FIREBASE_BASE + '/guilds.json';
 const DELETED_GUILDS_FB_URL = FIREBASE_BASE + '/deleted_guilds.json';
 
 const RETRY_MS       = 10_000;      // SSE reconnect delay after connection loss
+const POLL_MS        = 15_000;      // auto-refresh interval (fallback polling)
 
 const PROFILE_KEY = 'pt_profile_v1'; // localStorage key for visitor profile (must persist between visits)
 
@@ -36,6 +37,7 @@ let allGuilds       = [];   // guild registry — loaded from Firebase, never ca
 let isOnline        = false;
 let eventSource     = null;   // Firebase SSE connection
 let reconnectTimer      = null;
+let pollTimer           = null;   // fallback polling interval
 let modalSelectedGuild  = null; // guild selected inside the profile modal
 let modalSelectedPlayer = null; // player record selected from DB search
 let _dailyStats     = null;   // session-only daily stat accumulator (resets on page load)
@@ -208,10 +210,30 @@ function saveGuilds(guilds) {
 function getGuildById(id) {
   return allGuilds.find(g => g.id === id) ?? null;
 }
+// Returns true if a guild member entry (UID number or legacy name string) matches a player object
+function memberMatchesPlayer(entry, player) {
+  if (typeof entry === 'number') return player.uid > 0 && entry === player.uid;
+  return typeof entry === 'string' && entry.toLowerCase() === player.name.toLowerCase();
+}
+// Returns the canonical member entry for a player (UID number when available, else name string)
+function playerToMemberEntry(player) {
+  return player.uid > 0 ? player.uid : player.name;
+}
+// Find the player in allPlayers that matches the saved profile — prefers UID, falls back to name
+function findSelf(profile) {
+  if (!profile) return null;
+  const uid = profile.uid ?? 0;
+  if (uid > 0) {
+    const byUid = allPlayers.find(p => p.uid === uid);
+    if (byUid) return byUid;
+  }
+  return allPlayers.find(p => p.name.toLowerCase() === (profile.inGameName ?? '').toLowerCase()) ?? null;
+}
 // Find the guild (if any) that already lists this player as a member
-function findGuildByMember(playerName) {
-  const lower = playerName.toLowerCase();
-  return allGuilds.find(g => (g.members || []).some(m => m.toLowerCase() === lower)) ?? null;
+function findGuildByMember(player) {
+  return allGuilds.find(g =>
+    (g.members ?? []).some(m => memberMatchesPlayer(m, player))
+  ) ?? null;
 }
 function createGuild(name, id) {
   const guilds = loadGuilds();
@@ -221,28 +243,33 @@ function createGuild(name, id) {
   return guild;
 }
 
-// Attach the visitor's own name to a guild's members list and update their profile.
+// Attach the visitor to a guild using their UID (preferred) or name (fallback).
 function joinGuild(guildId) {
   const profile = loadProfile();
-  const myName  = profile?.inGameName;
+  const self    = findSelf(profile);
   const guilds  = loadGuilds();
+  // Use UID when available, fall back to name so profile setup works before any data loads
+  const entry   = self ? playerToMemberEntry(self) : (profile?.inGameName ?? null);
+  if (!entry) return;
 
   // Remove self from any previous guild
   const prevId = profile?.guildId;
   if (prevId && prevId !== guildId) {
     const prevIdx = guilds.findIndex(g => g.id === prevId);
-    if (prevIdx !== -1 && myName) {
-      guilds[prevIdx].members = guilds[prevIdx].members
-        .filter(n => n.toLowerCase() !== myName.toLowerCase());
+    if (prevIdx !== -1) {
+      guilds[prevIdx].members = self
+        ? guilds[prevIdx].members.filter(m => !memberMatchesPlayer(m, self))
+        : guilds[prevIdx].members.filter(m => typeof m !== 'string' || m.toLowerCase() !== String(entry).toLowerCase());
     }
   }
 
   // Add self to new guild
   const idx = guilds.findIndex(g => g.id === guildId);
-  if (idx !== -1 && myName) {
-    if (!guilds[idx].members.some(n => n.toLowerCase() === myName.toLowerCase())) {
-      guilds[idx].members.push(myName);
-    }
+  if (idx !== -1) {
+    const already = self
+      ? guilds[idx].members.some(m => memberMatchesPlayer(m, self))
+      : guilds[idx].members.some(m => typeof m === 'string' && m.toLowerCase() === String(entry).toLowerCase());
+    if (!already) guilds[idx].members.push(entry);
   }
 
   saveGuilds(guilds);
@@ -264,18 +291,16 @@ function saveGuildMembers(list) {
   guilds[idx].members = list;
   saveGuilds(guilds);
 }
-function addGuildMember(name) {
-  const trimmed = name.trim();
-  if (!trimmed) return;
+function addGuildMember(player) {
   const list = loadGuildMembers();
-  if (list.some(n => n.toLowerCase() === trimmed.toLowerCase())) return;
-  list.push(trimmed);
+  if (list.some(m => memberMatchesPlayer(m, player))) return;
+  list.push(playerToMemberEntry(player));
   saveGuildMembers(list);
   renderGuildTags();
   render(allPlayers);
 }
-function removeGuildMember(name) {
-  const list = loadGuildMembers().filter(n => n.toLowerCase() !== name.toLowerCase());
+function removeGuildMember(player) {
+  const list = loadGuildMembers().filter(m => !memberMatchesPlayer(m, player));
   saveGuildMembers(list);
   renderGuildTags();
   render(allPlayers);
@@ -303,19 +328,23 @@ tbody.addEventListener('click', e => {
   const addBtn = e.target.closest('.pt-add-guild-btn');
   if (addBtn) {
     const profile = loadProfile();
-    // No profile or no guild — open profile setup modal instead
-    if (!profile?.inGameName || !profile?.guildId) {
-      showProfileModal();
-      return;
-    }
-    addGuildMember(addBtn.dataset.name);
+    if (!profile?.inGameName || !profile?.guildId) { showProfileModal(); return; }
+    const uid    = parseInt(addBtn.dataset.uid ?? '0', 10);
+    const player = (uid > 0 ? allPlayers.find(p => p.uid === uid) : null)
+                ?? allPlayers.find(p => p.name === addBtn.dataset.name);
+    if (player) addGuildMember(player);
     addBtn.textContent = '✓';
     addBtn.disabled = true;
     addBtn.classList.add('pt-add-guild-btn--added');
     return;
   }
   const removeBtn = e.target.closest('.pt-remove-guild-btn');
-  if (removeBtn) removeGuildMember(removeBtn.dataset.name);
+  if (removeBtn) {
+    const uid    = parseInt(removeBtn.dataset.uid ?? '0', 10);
+    const player = (uid > 0 ? allPlayers.find(p => p.uid === uid) : null)
+                ?? allPlayers.find(p => p.name === removeBtn.dataset.name);
+    if (player) removeGuildMember(player);
+  }
 });
 
 refreshBtn.addEventListener('click', () => {
@@ -361,6 +390,7 @@ init();
 // data changes, so the page updates the instant the exe writes.
 function connectRealtime() {
   clearTimeout(reconnectTimer);
+  clearInterval(pollTimer);
   if (eventSource) { eventSource.close(); eventSource = null; }
 
   setStatus('loading', 'Connecting…');
@@ -386,6 +416,9 @@ function connectRealtime() {
     showNotice(true);
     reconnectTimer = setTimeout(connectRealtime, RETRY_MS);
   };
+
+  // Fallback polling — ensures data refreshes even when SSE events are silent
+  pollTimer = setInterval(fetchOnce, POLL_MS);
 }
 
 // One-shot REST fetch used for patch events
@@ -413,10 +446,27 @@ function handleData(data) {
   // Old format: { updatedAt, count, players: [...] }
   // Mixed:      old PUT data + new PATCH entries coexist (transition period)
 
-  // Collect name-keyed player entries (new format)
-  const newEntries = Object.values(data).filter(
+  // Collect player entries (values from Firebase — key format doesn't matter)
+  const rawEntries = Object.values(data).filter(
     v => v && typeof v === 'object' && typeof v.name === 'string' && typeof v.level === 'number' && v.level > 0
   );
+
+  // Deduplicate by UID (unique per character). When two entries share a UID, keep the
+  // more recently updated one. Players with no UID (uid=0/null) deduplicate by name.
+  const uidMap  = new Map(); // uid  → player
+  const nameMap = new Map(); // name → player (for uid=0 entries)
+  for (const p of rawEntries) {
+    const uid = typeof p.uid === 'number' ? p.uid : 0;
+    if (uid > 0) {
+      const existing = uidMap.get(uid);
+      if (!existing || (p.lastSeen ?? '') > (existing.lastSeen ?? '')) uidMap.set(uid, p);
+    } else {
+      const key = p.name.toLowerCase();
+      const existing = nameMap.get(key);
+      if (!existing || (p.lastSeen ?? '') > (existing.lastSeen ?? '')) nameMap.set(key, p);
+    }
+  }
+  const newEntries = [...uidMap.values(), ...nameMap.values()];
 
   let players, updatedAt;
 
@@ -447,6 +497,7 @@ function handleData(data) {
   setStatus('online', 'Live — last updated ' + timeAgo(updatedAt), null, updatedAt);
   showNotice(false);
   render(allPlayers);
+  renderProfileBar();
 }
 
 // ── Render table ───────────────────────────────────────────
@@ -454,20 +505,22 @@ function render(players) {
   const query    = searchInput.value.trim().toLowerCase();
   const sort     = sortSelect.value;
   const isGuild  = viewSelect.value === 'guild';
-  const guildSet = isGuild
-    ? new Set(loadGuildMembers().map(n => n.toLowerCase()))
-    : null;
+  const guildMemberEntries = isGuild ? loadGuildMembers() : null;
 
   let list = [...players];
 
-  // Guild filter
-  if (guildSet) {
-    list = list.filter(p => guildSet.has(p.name.toLowerCase()));
+  // Guild filter — match by UID when available, else by name
+  if (guildMemberEntries) {
+    list = list.filter(p => guildMemberEntries.some(m => memberMatchesPlayer(m, p)));
   }
 
   // Sort
   if (sort === 'level') {
     list.sort((a, b) => b.level - a.level || b.abilityScore - a.abilityScore);
+  } else if (sort === 'illusionStrength') {
+    list.sort((a, b) => b.illusionStrength - a.illusionStrength || b.abilityScore - a.abilityScore);
+  } else if (sort === 'seasonLevel') {
+    list.sort((a, b) => b.seasonLevel - a.seasonLevel || b.abilityScore - a.abilityScore);
   } else if (sort === 'name') {
     list.sort((a, b) => a.name.localeCompare(b.name));
   } else {
@@ -508,20 +561,27 @@ function renderRows() {
 
   const profile      = loadProfile();
   const hasGuild     = !!(profile?.guildId);
-  const guildMembers = loadGuildMembers().map(n => n.toLowerCase());
+  const rawGuildMembers = loadGuildMembers();
 
-  // Build a name → guild name lookup from all known guilds
+  // Build UID→guild and fallback name→guild lookups
   const allGuildsLocal = loadGuilds();
-  const playerGuildMap = {};
+  const guildByUid  = new Map();
+  const guildByName = new Map();
   allGuildsLocal.forEach(g => {
-    (g.members || []).forEach(m => {
-      playerGuildMap[m.toLowerCase()] = g.name;
+    (g.members ?? []).forEach(m => {
+      if (typeof m === 'number') guildByUid.set(m, g.name);
+      else if (typeof m === 'string') guildByName.set(m.toLowerCase(), g.name);
     });
   });
+
+  const selfPlayer = findSelf(profile);
 
   tbody.innerHTML = visible.map((p, i) => {
     const rank      = i + 1;
     const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
+    const isSelf    = selfPlayer
+      ? (selfPlayer.uid > 0 ? p.uid === selfPlayer.uid : p.name.toLowerCase() === selfPlayer.name.toLowerCase())
+      : false;
     const specIcon = p.professionSpec
       ? `<img class="pt-spec-icon" src="../assets/Image/${p.professionSpec.toLowerCase()}.png" alt="" aria-hidden="true">`
       : '';
@@ -531,8 +591,10 @@ function renderRows() {
     const illusionHtml = p.illusionStrength > 0
       ? `<span class="pt-illusion">✶ ${p.illusionStrength.toLocaleString()}</span>`
       : '';
-    const alreadyInGuild = guildMembers.includes(p.name.toLowerCase());
-    const playerGuildName = playerGuildMap[p.name.toLowerCase()] ?? null;
+    const alreadyInGuild = rawGuildMembers.some(m => memberMatchesPlayer(m, p));
+    const playerGuildName = (p.uid > 0 ? guildByUid.get(p.uid) : null)
+      ?? guildByName.get(p.name.toLowerCase())
+      ?? null;
     const actionCell = isGuild
       ? `<td class="pt-col-action">
           <button class="pt-remove-guild-btn"
@@ -551,7 +613,7 @@ function renderRows() {
         </td>`;
 
     return `
-      <tr>
+      <tr${isSelf ? ' class="pt-self-row"' : ''}>
         <td class="pt-col-rank">
           <span class="pt-rank ${rankClass}">${rank}</span>
         </td>
@@ -590,7 +652,7 @@ const _scrollObserver = new IntersectionObserver((entries) => {
 
 // ── Helpers ────────────────────────────────────────────────
 function updateStats(data) {
-  const total = data.totalPlayers ?? data.total_players ?? allPlayers.length;
+  const total = data._totalPlayers ?? data.totalPlayers ?? data.total_players ?? allPlayers.length;
   const { scanned, newP, updated } = accumulateDailyStats();
 
   if (statTotal)   statTotal.textContent   = Number(total).toLocaleString();
@@ -686,13 +748,13 @@ function renderGuildPanel() {
 
   // Leave button
   panel.querySelector('.pt-guild-leave-btn')?.addEventListener('click', (e) => {
-    const gid     = e.currentTarget.dataset.gid;
-    const p       = loadProfile();
-    const myName  = p?.inGameName;
-    const guilds  = loadGuilds();
-    const idx     = guilds.findIndex(g => g.id === gid);
-    if (idx !== -1 && myName) {
-      guilds[idx].members = guilds[idx].members.filter(n => n.toLowerCase() !== myName.toLowerCase());
+    const gid       = e.currentTarget.dataset.gid;
+    const p         = loadProfile();
+    const leaveSelf = findSelf(p);
+    const guilds    = loadGuilds();
+    const idx       = guilds.findIndex(g => g.id === gid);
+    if (idx !== -1 && leaveSelf) {
+      guilds[idx].members = guilds[idx].members.filter(m => !memberMatchesPlayer(m, leaveSelf));
       saveGuilds(guilds);
     }
     saveProfile({ ...p, guildId: null });
@@ -734,18 +796,25 @@ function renderProfileBar() {
     bar.innerHTML = `<button class="pt-profile-setup-btn" id="pt-profile-btn">👤 Set up your profile</button>`;
   } else {
     const guild = profile.guildId ? getGuildById(profile.guildId) : null;
+    const self  = findSelf(profile);
+    const statsHtml = self
+      ? `<span class="pt-profile-stats">Lv ${self.level}${self.seasonLevel > 0 ? `(+${self.seasonLevel})` : ''} · ${self.abilityScore.toLocaleString()} AS${self.illusionStrength > 0 ? ` · ✶ ${self.illusionStrength.toLocaleString()}` : ''}</span>`
+      : '';
     bar.innerHTML = `
       <span class="pt-profile-info">
         <span class="pt-profile-avatar">👤</span>
         <span class="pt-profile-name">${escHtml(profile.inGameName)}</span>
+        ${statsHtml}
         ${guild ? `<span class="pt-profile-guild-badge">⚔️ ${escHtml(guild.name)}</span>` : ''}
       </span>
       <span class="pt-profile-actions">
         <button class="pt-profile-edit-btn" id="pt-profile-btn">Edit</button>
+        <button class="pt-self-update-btn" id="pt-self-update-btn" title="Sync your current in-game stats to the website">📊 Update Stats</button>
         <button class="pt-profile-remove-btn" id="pt-profile-remove-btn">Remove</button>
       </span>`;
   }
   document.getElementById('pt-profile-btn')?.addEventListener('click', () => showProfileModal());
+  document.getElementById('pt-self-update-btn')?.addEventListener('click', () => showSelfUpdateModal());
   document.getElementById('pt-profile-remove-btn')?.addEventListener('click', () => {
     if (!confirm('Remove your profile? This will not remove you from your guild.')) return;
     saveProfile(null);
@@ -753,6 +822,124 @@ function renderProfileBar() {
     renderGuildPanel();
     render(allPlayers);
   });
+}
+
+// ── Self stats update modal ────────────────────────────────
+function showSelfUpdateModal() {
+  const profile = loadProfile();
+  if (!profile?.inGameName) { showProfileModal(); return; }
+
+  // Build the modal dynamically and inject it
+  let modal = document.getElementById('pt-self-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'pt-self-modal';
+    modal.className = 'pt-modal-overlay';
+    modal.setAttribute('hidden', '');
+    modal.innerHTML = `
+      <div class="pt-modal">
+        <div class="pt-modal-header">
+          <h2 class="pt-modal-title">📊 Update My Stats</h2>
+          <p class="pt-modal-sub">Enter your <strong>current in-game stats</strong> to sync them immediately to the website.<br>
+          These override the cached values from ZDPS until you relog/change zones.</p>
+        </div>
+        <div class="pt-modal-body">
+          <label class="pt-modal-label">Ability Score <span class="pt-modal-required">*</span></label>
+          <input type="number" id="pt-self-as" class="pt-modal-input" placeholder="e.g. 36000" min="0" />
+          <label class="pt-modal-label">Illusion Strength (Season Power)</label>
+          <input type="number" id="pt-self-illusion" class="pt-modal-input" placeholder="e.g. 2200" min="0" />
+          <label class="pt-modal-label">Season Level</label>
+          <input type="number" id="pt-self-season-level" class="pt-modal-input" placeholder="e.g. 50" min="0" />
+          <p id="pt-self-status" class="pt-self-status" hidden></p>
+        </div>
+        <div class="pt-modal-footer">
+          <button class="pt-modal-save-btn" id="pt-self-submit">Sync to Website</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    // Prefill with current values from the player table
+    const self = findSelf(profile);
+    if (self) {
+      document.getElementById('pt-self-as').value           = self.abilityScore    || '';
+      document.getElementById('pt-self-illusion').value     = self.illusionStrength || '';
+      document.getElementById('pt-self-season-level').value = self.seasonLevel     || '';
+    }
+
+    // Close on backdrop click
+    modal.addEventListener('click', e => { if (e.target === modal) modal.setAttribute('hidden', ''); });
+
+    document.getElementById('pt-self-submit').addEventListener('click', async () => {
+      const btn      = document.getElementById('pt-self-submit');
+      const statusEl = document.getElementById('pt-self-status');
+      const as       = parseInt(document.getElementById('pt-self-as').value, 10);
+      if (!as || as < 0) {
+        document.getElementById('pt-self-as').classList.add('pt-modal-input--error');
+        return;
+      }
+      document.getElementById('pt-self-as').classList.remove('pt-modal-input--error');
+
+      const illusion   = parseInt(document.getElementById('pt-self-illusion').value, 10)     || 0;
+      const seasonLvl  = parseInt(document.getElementById('pt-self-season-level').value, 10) || 0;
+
+      // Look up extra fields from current player data
+      const self = findSelf(profile);
+      const payload = {
+        name:             profile.inGameName,
+        level:            self?.level            ?? 60,
+        abilityScore:     as,
+        illusionStrength: illusion,
+        seasonLevel:      seasonLvl,
+        professionId:     self?.professionId     ?? 0,
+        subProfessionId:  self?.subProfessionId  ?? 0,
+        uid:              self?.uid              ?? 0,
+      };
+
+      btn.disabled    = true;
+      btn.textContent = 'Syncing…';
+      statusEl.hidden = true;
+
+      try {
+        const res = await fetch('http://localhost:7777/self', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+          signal:  AbortSignal.timeout(8000),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.textContent = '✓ Synced! Refreshing…';
+          statusEl.className   = 'pt-self-status pt-self-status--ok';
+          statusEl.hidden      = false;
+          // Immediately pull the updated data from Firebase so the table
+          // and profile bar reflect the new stats without waiting for the next poll.
+          await fetchOnce();
+          setTimeout(() => modal.setAttribute('hidden', ''), 2000);
+        } else {
+          throw new Error(data.error || 'Unknown error');
+        }
+      } catch (err) {
+        statusEl.textContent = `⚠️ Could not reach BP-Player-Tracker.exe — make sure it is running. (${err.message})`;
+        statusEl.className   = 'pt-self-status pt-self-status--err';
+        statusEl.hidden      = false;
+      } finally {
+        btn.disabled    = false;
+        btn.textContent = 'Sync to Website';
+      }
+    });
+  } else {
+    // Modal already in DOM — just prefill again with latest data
+    const self = findSelf(profile);
+    if (self) {
+      document.getElementById('pt-self-as').value           = self.abilityScore   || '';
+      document.getElementById('pt-self-illusion').value     = self.illusionStrength || '';
+      document.getElementById('pt-self-season-level').value = self.seasonLevel    || '';
+    }
+    document.getElementById('pt-self-status').hidden = true;
+  }
+
+  modal.removeAttribute('hidden');
+  document.getElementById('pt-self-as')?.focus();
 }
 
 // ── Profile modal ──────────────────────────────────────────
@@ -786,7 +973,7 @@ function showProfileModal() {
       nameInput.readOnly  = true;
       nameInput.classList.add('pt-modal-input--locked');
       // Check if this player is already in a guild
-      const existingGuild = findGuildByMember(match.name);
+      const existingGuild = findGuildByMember(match);
       if (existingGuild) {
         modalSelectedGuild = existingGuild;
         if (guildInput) guildInput.value = existingGuild.name;
@@ -852,16 +1039,27 @@ function initProfileModal() {
 
     nameHint.hidden     = true;
     nameDropdown.hidden = false;
-    nameDropdown.innerHTML = matches.slice(0, 12).map(p =>
-      `<div class="pt-dropdown-item" data-name="${escHtml(p.name)}">
+    // Key by UID when available so duplicate names can be told apart
+    nameDropdown.innerHTML = matches.slice(0, 12).map(p => {
+      const uid   = p.uid > 0 ? p.uid : 0;
+      const spec  = p.professionSpec || p.profession || '';
+      const meta  = [
+        `Lv ${p.level}${p.seasonLevel > 0 ? `(+${p.seasonLevel})` : ''}`,
+        `${p.abilityScore.toLocaleString()} AS`,
+        spec || null,
+        uid  ? `UID: ${uid}` : null,
+      ].filter(Boolean).join(' · ');
+      return `<div class="pt-dropdown-item" data-uid="${uid}" data-name="${escHtml(p.name)}">
         <span>${escHtml(p.name)}</span>
-        <span class="pt-dropdown-meta">Lv ${p.level}${p.seasonLevel > 0 ? `(+${p.seasonLevel})` : ''} · ${p.abilityScore.toLocaleString()} AS</span>
-      </div>`
-    ).join('');
+        <span class="pt-dropdown-meta">${escHtml(meta)}</span>
+      </div>`;
+    }).join('');
 
     nameDropdown.querySelectorAll('.pt-dropdown-item').forEach(el => {
       el.addEventListener('click', () => {
-        const selected = allPlayers.find(p => p.name === el.dataset.name);
+        const uid      = parseInt(el.dataset.uid, 10);
+        const selected = (uid > 0 ? allPlayers.find(p => p.uid === uid) : null)
+                      ?? allPlayers.find(p => p.name === el.dataset.name);
         if (!selected) return;
         modalSelectedPlayer      = selected;
         nameInput.value          = selected.name;
@@ -870,7 +1068,7 @@ function initProfileModal() {
         nameDropdown.hidden      = true;
         nameHint.hidden          = true;
         // If this player is already in a guild, auto-select it and hide the guild section
-        const existingGuild = findGuildByMember(selected.name);
+        const existingGuild = findGuildByMember(selected);
         if (existingGuild) {
           modalSelectedGuild = existingGuild;
           if (guildInput) guildInput.value = existingGuild.name;
@@ -958,13 +1156,12 @@ function initProfileModal() {
       guildId = createGuild(guildText, finalId).id;
     }
 
-    saveProfile({ inGameName: name, guildId });
+    saveProfile({ inGameName: name, guildId, uid: modalSelectedPlayer?.uid ?? 0 });
     if (guildId) {
-      // Only call joinGuild if the player isn't already a member of that guild
-      const targetGuild = loadGuilds().find(g => g.id === guildId);
-      const alreadyMember = targetGuild?.members?.some(
-        m => m.toLowerCase() === name.toLowerCase()
-      ) ?? false;
+      const targetGuild   = loadGuilds().find(g => g.id === guildId);
+      const alreadyMember = modalSelectedPlayer
+        ? targetGuild?.members?.some(m => memberMatchesPlayer(m, modalSelectedPlayer)) ?? false
+        : false;
       if (!alreadyMember) joinGuild(guildId);
     }
     hideProfileModal();

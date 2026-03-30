@@ -342,6 +342,12 @@ body {
   transition: background 0.15s;
 }
 .pt-table tbody tr:hover { background: rgba(79,140,201,0.06); }
+.pt-table tbody tr.pt-self-row {
+  background: rgba(79,140,201,0.12);
+  outline: 1px solid rgba(79,140,201,0.35);
+  outline-offset: -1px;
+}
+.pt-table tbody tr.pt-self-row:hover { background: rgba(79,140,201,0.18); }
 
 /* Column widths */
 .pt-col-rank { width: 48px; text-align: center; }
@@ -473,6 +479,13 @@ body {
 .pt-profile-info { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
 .pt-profile-avatar { font-size: 1.1rem; }
 .pt-profile-name { font-weight: 700; color: var(--text-main); }
+.pt-profile-stats {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  background: rgba(255,255,255,0.05);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
 .pt-profile-guild-badge {
   background: var(--accent-dim);
   color: var(--accent);
@@ -512,6 +525,28 @@ body {
   transition: background 0.15s;
 }
 .pt-profile-remove-btn:hover { background: rgba(220,53,69,0.12); }
+
+.pt-self-update-btn {
+  background: transparent;
+  border: 1px solid var(--success);
+  color: var(--success);
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pt-self-update-btn:hover { background: rgba(76,175,125,0.12); }
+
+.pt-self-status {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.pt-self-status--ok  { background: rgba(76,175,125,0.15); color: var(--success); }
+.pt-self-status--err { background: rgba(224,93,93,0.15);  color: var(--danger); }
 
 /* ── Profile modal ── */
 .pt-modal-overlay {
