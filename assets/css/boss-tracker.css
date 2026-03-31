@@ -301,11 +301,12 @@ body {
 /* ── Card footer (View Details button) ── */
 .bt-footer {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .bt-details-btn {
-  flex: 1;
+  flex: 1 1 100%;
   text-align: center;
   padding: 8px 12px;
   border-radius: 8px;
@@ -328,9 +329,9 @@ body {
   text-align: center;
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(34,197,94,0.1);
-  border: 1px solid rgba(34,197,94,0.35);
-  color: #4ade80;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.35);
+  color: #f87171;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
@@ -338,19 +339,50 @@ body {
 }
 
 .bt-alert-btn:hover {
+  background: rgba(239,68,68,0.2);
+  border-color: #f87171;
+}
+
+.bt-alert-btn--on {
+  background: rgba(34,197,94,0.1);
+  border-color: rgba(34,197,94,0.35);
+  color: #4ade80;
+}
+
+.bt-alert-btn--on:hover {
   background: rgba(34,197,94,0.2);
   border-color: #4ade80;
 }
 
-.bt-alert-btn--off {
+/* ── Web alert button ── */
+.bt-web-alert-btn {
+  flex: 1;
+  text-align: center;
+  padding: 8px 12px;
+  border-radius: 8px;
   background: rgba(239,68,68,0.1);
-  border-color: rgba(239,68,68,0.35);
+  border: 1px solid rgba(239,68,68,0.35);
   color: #f87171;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.bt-alert-btn--off:hover {
+.bt-web-alert-btn:hover {
   background: rgba(239,68,68,0.2);
   border-color: #f87171;
+}
+
+.bt-web-alert-btn--on {
+  background: rgba(34,197,94,0.1);
+  border-color: rgba(34,197,94,0.35);
+  color: #4ade80;
+}
+
+.bt-web-alert-btn--on:hover {
+  background: rgba(34,197,94,0.2);
+  border-color: #4ade80;
 }
 
 /* ── Credits ── */
@@ -369,6 +401,26 @@ body {
 
 .bt-credits a:hover {
   text-decoration: underline;
+}
+
+/* ── Channel pill tooltip ── */
+#bt-pill-tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.88);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 5px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+#bt-pill-tooltip.bt-tooltip-visible {
+  opacity: 1;
 }
 
 /* ── Responsive ── */

@@ -8,8 +8,10 @@
   const PB_BASE = 'https://db.bptimer.com';
   const MAX_CHANNELS = 15;
   const POLL_INTERVAL = 30_000; // 30 seconds
-  const WEBHOOK_KEY      = 'bt_discord_webhook';
-  const ALERT_KEY_PREFIX  = 'bt_auto_alert_'; // + bossId
+  const WEBHOOK_KEY          = 'bt_discord_webhook';
+  const ALERT_KEY_PREFIX     = 'bt_auto_alert_';   // + bossId
+  const WEB_ALERT_KEY_PREFIX = 'bt_web_alert_';    // + bossId
+  const WEB_ALERT_HP_THRESHOLD = 15;               // desktop alert when HP ≤ this value
 
   /* ── Stale-data thresholds (mirrors bptimer source) ── */
   const STALE_FULL_HP  = 5 * 60 * 1000; // 5 min  — 100 % HP
@@ -101,12 +103,34 @@
   }
 
   function isAutoAlertEnabled(bossId) {
-    // Default ON if not explicitly set to 'off'
-    return localStorage.getItem(ALERT_KEY_PREFIX + bossId) !== 'off';
+    // Default OFF — only active when explicitly set to 'on'
+    return localStorage.getItem(ALERT_KEY_PREFIX + bossId) === 'on';
   }
 
   function setAutoAlert(bossId, enabled) {
     localStorage.setItem(ALERT_KEY_PREFIX + bossId, enabled ? 'on' : 'off');
+  }
+
+  function isWebAlertEnabled(bossId) {
+    // Default OFF — only active when explicitly set to 'on'
+    return localStorage.getItem(WEB_ALERT_KEY_PREFIX + bossId) === 'on';
+  }
+
+  function setWebAlert(bossId, enabled) {
+    localStorage.setItem(WEB_ALERT_KEY_PREFIX + bossId, enabled ? 'on' : 'off');
+  }
+
+  async function fireWebNotification(bossName, channel, hp) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    if (Notification.permission !== 'granted') {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') return;
+    }
+    new Notification(`⚠️ ${bossName} LOW HP!`, {
+      body: `Ch ${channel} — ${hp}% HP remaining`,
+      icon: 'https://bptimer.com/favicon.ico',
+    });
   }
 
   function configureWebhook() {
@@ -170,10 +194,11 @@
 
   /* ── Auto-alert: check HP threshold transitions after each poll ── */
   async function checkAlerts(grouped) {
-    if (!getWebhookUrl()) return; // no webhook configured — skip silently
-
     for (const boss of BOSSES) {
-      if (!isAutoAlertEnabled(boss.id)) continue; // this boss's alerts are toggled off
+      const discordOn = isAutoAlertEnabled(boss.id) && !!getWebhookUrl();
+      const webOn     = isWebAlertEnabled(boss.id);
+      if (!discordOn && !webOn) continue; // nothing to do for this boss
+
       const records = grouped[boss.id] || [];
       const currentKeys = new Set();
 
@@ -191,37 +216,44 @@
           continue;
         }
 
-        const crossedLow = prev > 30 && r.last_hp > 0 && r.last_hp <= 30;
-        const justKilled = prev > 0  && r.last_hp === 0;
+        const crossedLow   = prev > 30 && r.last_hp > 0 && r.last_hp <= 30;
+        const crossedWebHP = prev > WEB_ALERT_HP_THRESHOLD && r.last_hp > 0 && r.last_hp <= WEB_ALERT_HP_THRESHOLD;
+        const justKilled   = prev > 0  && r.last_hp === 0;
 
-        if (crossedLow) {
-          // Store the message ID so it can be deleted together with the killed message
-          const msgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
-          if (msgId) pendingAlertMsgIds[key] = msgId;
+        if (discordOn) {
+          if (crossedLow) {
+            // Store the message ID so it can be deleted together with the killed message
+            const msgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
+            if (msgId) pendingAlertMsgIds[key] = msgId;
+          }
+
+          if (justKilled) {
+            const wh = getWebhookUrl().replace(/\/+$/, '');
+            const lowMsgId = pendingAlertMsgIds[key];
+            delete pendingAlertMsgIds[key];
+            const killedMsgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
+            console.log(`[BossTracker] justKilled — killedMsgId=${killedMsgId} lowMsgId=${lowMsgId} wh=${wh}`);
+            // After 10 s delete the killed message and the paired low-HP message simultaneously
+            setTimeout(async () => {
+              console.log(`[BossTracker] Delete timer fired for ${boss.name} ch${r.channel_number}`);
+              const deletions = [];
+              if (killedMsgId) deletions.push(
+                fetch(`${wh}/messages/${killedMsgId}`, { method: 'DELETE' })
+                  .then(dr => console.log(`[BossTracker] Killed msg delete: ${dr.status}`))
+                  .catch(err => console.error('[BossTracker] Killed msg delete error:', err))
+              );
+              if (lowMsgId) deletions.push(
+                fetch(`${wh}/messages/${lowMsgId}`, { method: 'DELETE' })
+                  .then(dr => console.log(`[BossTracker] Low-HP msg delete: ${dr.status}`))
+                  .catch(err => console.error('[BossTracker] Low-HP msg delete error:', err))
+              );
+              await Promise.all(deletions);
+            }, DELETE_AFTER_MS);
+          }
         }
 
-        if (justKilled) {
-          const wh = getWebhookUrl().replace(/\/+$/, '');
-          const lowMsgId = pendingAlertMsgIds[key];
-          delete pendingAlertMsgIds[key];
-          const killedMsgId = await sendDiscordMessage(boss.name, r.channel_number, r.last_hp, { promptIfMissing: false, autoDelete: false });
-          console.log(`[BossTracker] justKilled — killedMsgId=${killedMsgId} lowMsgId=${lowMsgId} wh=${wh}`);
-          // After 10 s delete the killed message and the paired low-HP message simultaneously
-          setTimeout(async () => {
-            console.log(`[BossTracker] Delete timer fired for ${boss.name} ch${r.channel_number}`);
-            const deletions = [];
-            if (killedMsgId) deletions.push(
-              fetch(`${wh}/messages/${killedMsgId}`, { method: 'DELETE' })
-                .then(dr => console.log(`[BossTracker] Killed msg delete: ${dr.status}`))
-                .catch(err => console.error('[BossTracker] Killed msg delete error:', err))
-            );
-            if (lowMsgId) deletions.push(
-              fetch(`${wh}/messages/${lowMsgId}`, { method: 'DELETE' })
-                .then(dr => console.log(`[BossTracker] Low-HP msg delete: ${dr.status}`))
-                .catch(err => console.error('[BossTracker] Low-HP msg delete error:', err))
-            );
-            await Promise.all(deletions);
-          }, DELETE_AFTER_MS);
+        if (webOn && crossedWebHP) {
+          fireWebNotification(boss.name, r.channel_number, r.last_hp);
         }
 
         prevHpMap[key] = r.last_hp;
@@ -265,6 +297,7 @@
 
   /* ── Rendering ── */
   function renderAllChannels() {
+    const tooltip = document.getElementById('bt-pill-tooltip');
     for (const boss of BOSSES) {
       const container = document.getElementById(`btch-${boss.id}`);
       if (!container) continue;
@@ -294,6 +327,18 @@
             : `Ch ${item.ch} — ${item.hp}% HP (click to report)`;
           span.classList.add('bt-pill--clickable');
           span.addEventListener('click', () => sendDiscordMessage(boss.name, item.ch, item.hp));
+
+          if (tooltip) {
+            span.addEventListener('mouseenter', () => {
+              tooltip.textContent = item.status === 'dead' ? 'Killed' : `${item.hp}% HP`;
+              tooltip.classList.add('bt-tooltip-visible');
+              const r = span.getBoundingClientRect();
+              tooltip.style.left = `${r.left + r.width / 2}px`;
+              tooltip.style.top = `${r.top - 6}px`;
+              tooltip.style.transform = 'translate(-50%, -100%)';
+            });
+            span.addEventListener('mouseleave', () => tooltip.classList.remove('bt-tooltip-visible'));
+          }
 
           // HP fill bar
           const fill = document.createElement('span');
@@ -343,6 +388,13 @@
     const section = document.getElementById('boss-tracker');
     if (!section) return;
 
+    /* Global tooltip for channel pills */
+    if (!document.getElementById('bt-pill-tooltip')) {
+      const tt = document.createElement('div');
+      tt.id = 'bt-pill-tooltip';
+      document.body.appendChild(tt);
+    }
+
     /* Header */
     const header = document.createElement('div');
     header.className = 'bt-header';
@@ -391,23 +443,47 @@
              href="https://bptimer.com/"
              target="_blank"
              rel="noopener noreferrer">View Details ↗</a>
-          <button class="bt-alert-btn" id="btalert-${boss.id}" type="button"></button>
+          <button class="bt-alert-btn" id="btalert-${boss.id}" type="button">🔔 Discord</button>
+          <button class="bt-web-alert-btn" id="btweb-${boss.id}" type="button">🔔 Desktop</button>
         </div>
       `;
       cardsRow.appendChild(card);
 
-      /* Wire per-boss alert toggle */
+      /* Wire per-boss Discord alert toggle */
       const alertBtn = card.querySelector(`#btalert-${boss.id}`);
       const refreshAlertBtn = () => {
         const on = isAutoAlertEnabled(boss.id);
-        alertBtn.textContent = on ? '🟢 Alerts ON' : '🔴 Alerts OFF';
-        alertBtn.title = on ? 'Auto-alerts ON — click to disable' : 'Auto-alerts OFF — click to enable';
-        alertBtn.classList.toggle('bt-alert-btn--off', !on);
+        alertBtn.title = on ? 'Discord alerts ON — click to disable' : 'Discord alerts OFF — click to enable';
+        alertBtn.classList.toggle('bt-alert-btn--on', on);
       };
       refreshAlertBtn();
       alertBtn.addEventListener('click', () => {
         setAutoAlert(boss.id, !isAutoAlertEnabled(boss.id));
         refreshAlertBtn();
+      });
+
+      /* Wire per-boss web alert toggle */
+      const webAlertBtn = card.querySelector(`#btweb-${boss.id}`);
+      const refreshWebAlertBtn = () => {
+        const on = isWebAlertEnabled(boss.id);
+        webAlertBtn.title = on
+          ? `Web alerts ON (≤${WEB_ALERT_HP_THRESHOLD}% HP) — click to disable`
+          : 'Web alerts OFF — click to enable';
+        webAlertBtn.classList.toggle('bt-web-alert-btn--on', on);
+      };
+      refreshWebAlertBtn();
+      webAlertBtn.addEventListener('click', async () => {
+        if (!isWebAlertEnabled(boss.id)) {
+          if ('Notification' in window && Notification.permission !== 'granted') {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {
+              alert('⚠️ Browser notifications are blocked. Please allow them in your browser settings.');
+              return;
+            }
+          }
+        }
+        setWebAlert(boss.id, !isWebAlertEnabled(boss.id));
+        refreshWebAlertBtn();
       });
     }
 
